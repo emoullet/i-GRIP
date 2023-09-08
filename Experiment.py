@@ -653,7 +653,7 @@ class Participant:
         self.instructions_text = tk.StringVar()
         self.instructions_text.set("WELCOME TO THE I-GRIP EXPERIMENT")
         # self.instructions_text.set("Please read the instructions below and click on 'Start' when you are ready to start the experiment.")
-        self.instructions_label = ttk.Label(frame, textvariable=self.instructions_ text, font=("Helvetica", 25), wraplength=size-20, justify='center')
+        self.instructions_label = ttk.Label(frame, textvariable=self.instructions_text, font=("Helvetica", 25), wraplength=size-20, justify='center')
         #center the label vertically
         self.instructions_label.pack(fill=tk.BOTH, expand=True)
     

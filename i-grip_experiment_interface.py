@@ -25,6 +25,7 @@ class ExperimentInterface:
         self.experiment = ex.Experiment(name = self.name, mode = mode)
 
         self.build_window()
+        self.params_separator = ';'
         
     def build_window(self):
         style = Style(theme="superhero")
