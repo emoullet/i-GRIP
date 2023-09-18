@@ -8,13 +8,29 @@ import cv2
 import numpy as np
 import trimesh as tm
 import pyfqmr
-import i_grip.HandDetectors
+import pyglet
 
 from i_grip.utils import *
 import pandas as pd
 from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 
+class MeshScene(tm.Scene):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)    
+     
+    def start(self):
+        """
+        Start the pyglet main loop.
+        """
+        pyglet.app.run()
+        
+    def stop(self):
+        """
+        Stop the pyglet main loop.
+        """
+        pyglet.app.exit()
+        self.on_close()
 
 class Scene :
     
@@ -27,9 +43,10 @@ class Scene :
     
     _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS = dict(is_displayed = True,
                                                     draw_grid = True, 
-                                                    show_velocity_cone = True)
+                                                    show_velocity_cone = True
+                                                    )
     
-    def __init__(self, cam_data, name = 'Grasping experiment',  video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS) -> None:
+    def __init__(self, cam_data, name = 'Grasping experiment',  video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS, fps = 30.0) -> None:
         self.hands = dict()
         self.objects = dict()
         self.cam_data = cam_data
@@ -49,7 +66,7 @@ class Scene :
         self.draw_mesh = True
         self.new_hand_meshes = []
         self.new_object_meshes = []
-        self.scene_callback_period = 1.0/30.0
+        self.scene_callback_period = 1.0/fps
         
         if self.draw_mesh:
             self.define_mesh_scene()
@@ -66,7 +83,7 @@ class Scene :
     def display_meshes(self):
         print('Starting mesh display thread')
         self.scene_window = self.mesh_scene.show(callback=self.update_meshes,callback_period=self.scene_callback_period, line_settings={'point_size':20}, start_loop=False)
-        self.scene_window.start()
+        pyglet.app.run()
         print('Mesh display thread closed')
 
     def update_hands_meshes(self, scene):
@@ -275,7 +292,9 @@ class Scene :
     def stop(self):
         #stop the callback thread
         print('stopping inside scene')
-        self.scene_window.stop()
+        pyglet.app.exit()
+        print('stopped pyglet app inside scene')
+        self.scene_window.on_close()
         print('stopped scene window inside scene')
         self.t_scene.join()
         print('joined scene thread inside scene')
@@ -353,9 +372,9 @@ class LiveScene(Scene):
         if self.rendering_options['write_fps']:
             self.write_fps(img)
 
-        cv2.imshow(self.name, img)
+        # cv2.imshow(self.name, img)
 
-        return cv2.waitKey(1) & 0xFF == 27
+        return img
     
 class ReplayScene(Scene):
         
@@ -368,7 +387,8 @@ class ReplayScene(Scene):
     
     _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS = dict(is_displayed = True,
                                                     draw_grid = True,
-                                                    show_velocity_cone = True)
+                                                    show_velocity_cone = True,
+                                                    fps = 30)
     
     def __init__(self, cam_data, name='Grasping experiment',   video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS) -> None:
         super().__init__(cam_data, name, video_rendering_options, scene_rendering_options)
@@ -452,15 +472,19 @@ class Entity:
 class RigidObject(Entity):
     
     
-    _TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad/'
-    _YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models/'
+    _TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad'
+    _YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models'
+    _TLESS_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/tless.cad/'
+    _YCVB_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/ycbv/'
     
     def __init__(self, dataset = 'tless',  label = None, pose=None, score = None, render_box=None, timestamp = None) -> None:
         super().__init__()
         if(dataset == "ycbv"):
             self.mesh_path = RigidObject._YCVB_MESH_PATH
+            self.urdf_path = RigidObject._YCVB_URDF_PATH
         elif(dataset == "tless"):
             self.mesh_path = RigidObject._TLESS_MESH_PATH
+            self.urdf_path = RigidObject._TLESS_URDF_PATH
             
         self.label = label
         self.default_color = (0, 255, 0)
@@ -484,7 +508,9 @@ class RigidObject(Entity):
         
         self.appearing_radius = 0.2
         self.simplify = False
+        self.load_simplified = True
         self.load_mesh()
+        # self.load_urdf()
         self.mesh_pos = np.array([0,0,0])
         self.mesh_transform = np.identity(4)
         
@@ -523,20 +549,30 @@ class RigidObject(Entity):
         
     def load_mesh(self):
         try :
-            self.mesh = tm.load_mesh(self.mesh_path+self.label+'.ply')
-            print('MESH LOADED : ' + self.mesh_path+self.label+'.ply')
+            if self.load_simplified:
+                self.mesh = tm.load_mesh(self.mesh_path+'_simplified/'+self.label+'.ply')
+                print('MESH LOADED : ' + self.mesh_path+'_simplified/'+self.label+'.ply')
+            else:
+                self.mesh = tm.load_mesh(self.mesh_path+'/'+self.label+'.ply')
+                print('MESH LOADED : ' + self.mesh_path+'/'+self.label+'.ply')
             if self.simplify:
                 mesh_simplifier = pyfqmr.Simplify()
                 mesh_simplifier.setMesh(self.mesh.vertices,self.mesh.faces)
                 mesh_simplifier.simplify_mesh(target_count = 1000, aggressiveness=7, preserve_border=True, verbose=10)
                 v, f, n = mesh_simplifier.getMesh()
                 self.mesh = tm.Trimesh(vertices=v, faces=f, face_normals=n)
+            print(len(self.mesh.vertices))
         except:
             self.mesh = None
             print(self.mesh_path)
             print('MESH LOADING FAILED')
-            exit()
-            
+    
+    def load_urdf(self):
+        self.mesh = tm.load_mesh(self.urdf_path+self.label+'/'+self.label+'.obj')
+        print(len(self.mesh.vertices))
+        print('URDF LOADED : ' + self.urdf_path+self.label+'/'+self.label+'.obj')
+        exit()
+
     def update_mesh(self):
         self.mesh_pos = self.state.pose.position.v*np.array([-1,1,1])
         # mesh_orient_quat = [self.pose.orientation.q[i] for i in range(4)]

@@ -628,7 +628,7 @@ def kill_gpu_processes():
     # use the command nvidia-smi and then grep "grasp_int" and "python" to get the list of processes running on the gpu
     # execute the command in a subprocess and get the output
     try:
-        processes = subprocess.check_output("nvidia-smi | grep 'grasp_int' | grep 'python'", shell=True)
+        processes = subprocess.check_output("nvidia-smi | grep 'i_grip' | grep 'python'", shell=True)
         # split the output into lines
         processes = processes.splitlines()
         # get rid of the b' at the beginning of each line

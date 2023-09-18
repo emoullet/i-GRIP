@@ -25,13 +25,38 @@ class HybridOAKMediapipeDetector():
     _1080P = [1920., 1080.]
     _480P = [640., 480.]
     
-    def __init__(self, replay = False, replay_data= None, cam_params = None, device_id = None, fps=30., resolution = _720P, detect_hands = True, mediapipe_model_path = _MEDIAPIPE_MODEL_PATH) -> None:
+    def __init__(self, replay = False, 
+                 replay_data= None, 
+                 cam_params = None, 
+                 device_id = None, 
+                 fps=30., 
+                 resolution = _720P, 
+                 detect_hands = True, 
+                 mediapipe_model_path = _MEDIAPIPE_MODEL_PATH, 
+                 print_rgb_stereo_latency = False, 
+                 show_disparity=False) -> None:
+        """_summary_
+
+        Args:
+            replay (bool, optional): _description_. Defaults to False.
+            replay_data (_type_, optional): _description_. Defaults to None.
+            cam_params (_type_, optional): _description_. Defaults to None.
+            device_id (_type_, optional): _description_. Defaults to None.
+            fps (_type_, optional): _description_. Defaults to 30..
+            resolution (_type_, optional): _description_. Defaults to _720P.
+            detect_hands (bool, optional): _description_. Defaults to True.
+            mediapipe_model_path (_type_, optional): _description_. Defaults to _MEDIAPIPE_MODEL_PATH.
+            print_rgb_stereo_latency (bool, optional): _description_. Defaults to False.
+            show_disparity (bool, optional): _description_. Defaults to False.
+        """
         self.type = 'HybridOAKMediapipeDetector'
         self.cam_auto_mode = True
         self.device_id = device_id
         self.replay = replay
         self.fps = fps
         self.resolution = resolution
+        self.print_rgb_stereo_latency=print_rgb_stereo_latency
+        self.show_disparity=show_disparity
         print(f'fps: {fps}, resolution: {resolution}')
         if self.replay :
             if replay_data is not None:
@@ -60,11 +85,6 @@ class HybridOAKMediapipeDetector():
                 # min_hand_presence_confidence = 0.8,
                 result_callback=self.extract_hands)
 
-        self.crop = False
-        if self.crop:
-            self.croped_resolution = (self.cam_data['resolution'][1], self.cam_data['resolution'][1])
-        else:
-            self.croped_resolution = self.cam_data['resolution']
         self.frame = None
         self.new_frame = False
         if detect_hands:
@@ -154,6 +174,8 @@ class HybridOAKMediapipeDetector():
         print("Creating pipeline...")
         # Start defining a pipeline
         pipeline = dai.Pipeline()
+        pipeline.setXLinkChunkSize(0) # decrease latency
+        
         # ColorCamera
         print("Creating Color Camera...")
         camRgb = pipeline.createColorCamera()
@@ -164,7 +186,7 @@ class HybridOAKMediapipeDetector():
 
         camRgb.setBoardSocket(dai.CameraBoardSocket.RGB)
         camRgb.setInterleaved(False)
-        # camRgb.setIspScale(2, 3)
+        camRgb.setIspScale(2, 3)
         if self.cam_auto_mode:
             camRgb.initialControl.setAutoExposureEnable()
         else:
@@ -186,11 +208,13 @@ class HybridOAKMediapipeDetector():
             monoCam.setResolution(self.mono_res)
             monoCam.setFps(self.fps)
 
+        print('ici')
 
         self.cam_out = pipeline.createXLinkOut()
         self.cam_out.setStreamName("rgb")
-        self.cam_out.input.setQueueSize(1)
-        self.cam_out.input.setBlocking(False)
+        ### uncommenting decreases rgb latency, but since stereo has bigger latency, keeping them commented decreases overall latency between rgb and stereo
+        # self.cam_out.input.setQueueSize(1)
+        # self.cam_out.input.setBlocking(False)
         camRgb.preview.link(self.cam_out.input)
 
         # Create StereoDepth node that will produce the depth map
@@ -219,7 +243,10 @@ class HybridOAKMediapipeDetector():
         self.depth_out = pipeline.create(dai.node.XLinkOut)
         self.depth_out.setStreamName("depth")
         stereo.depth.link(self.depth_out.input)
-        print("Pipeline created.")
+        # decreases latency
+        self.depth_out.input.setQueueSize(1)
+        self.depth_out.input.setBlocking(False)
+        print("Pipeline creeeeeeeeeeeeeated.")
         return pipeline
 
 
@@ -239,7 +266,7 @@ class HybridOAKMediapipeDetector():
                 handedness = handedness_list[idx]
 
                 if len(hand_landmarks)>0 and self.depth_map is not None:
-                    hand = HandPrediction(handedness, hand_landmarks, hand_world_landmarks, self.croped_resolution, self.depth_map, self.stereoInference)
+                    hand = HandPrediction(handedness, hand_landmarks, hand_world_landmarks, self.resolution, self.depth_map, self.stereoInference)
                     hands_preds.append(hand)
             self.hands_predictions = hands_preds
 
@@ -289,21 +316,24 @@ class HybridOAKMediapipeDetector():
             frame = d_frame.getFrame()
             frame = cv2.resize(frame, self.cam_data['resolution'])
             # print(frame.shape)
-            if self.crop:
-                frame = crop_to_rect(frame)
             self.depth_map=frame
 
-            # depthFrameColor = cv2.normalize(self.depth_map, None, 255, 0, cv2.NORM_INF, cv2.CV_8UC1)
-            # depthFrameColor = cv2.equalizeHist(depthFrameColor)
-            # depthFrameColor = cv2.applyColorMap(depthFrameColor, cv2.COLORMAP_JET)
-            # cv2.imshow(f'depth {self.device_id}', depthFrameColor)
+        if self.print_rgb_stereo_latency:
+            now=dai.Clock.now()
+            rgb_latency= (now - r_frame.getTimestamp()).total_seconds()*1000
+            depth_latency= (now - d_frame.getTimestamp()).total_seconds()*1000
+            print(f'rgb latency: {rgb_latency} ms, depth latency: {depth_latency} ms')
+        
+        if self.show_disparity:
+            depthFrameColor = cv2.normalize(self.depth_map, None, 255, 0, cv2.NORM_INF, cv2.CV_8UC1)
+            depthFrameColor = cv2.equalizeHist(depthFrameColor)
+            depthFrameColor = cv2.applyColorMap(depthFrameColor, cv2.COLORMAP_JET)
+            cv2.imshow(f'depth {self.device_id}', depthFrameColor)
 
         if r_frame is not None:
             frame = r_frame.getCvFrame() 
             # cv2.imshow('raw_'+name, frame)
             # frame = cv2.resize(frame, self.cam_data['resolution']) 
-            if self.crop:
-                frame = crop_to_rect(frame)
             # frame=cv2.flip(frame,1)
             # print(frame.shape)
             success = True
@@ -317,7 +347,8 @@ class HybridOAKMediapipeDetector():
         if self.frame is not None and self.new_frame:
         # if frame is not None and depthFrame is not None:
             # mp_frame = cv2.cvtColor(cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-            mp_frame = cv2.cvtColor(cv2.flip(self.frame,1), cv2.COLOR_BGR2RGB) 
+            # mp_frame = cv2.cvtColor(cv2.flip(self.frame,1), cv2.COLOR_BGR2RGB) 
+            mp_frame = cv2.flip(self.frame,1)
             # mp_frame=self.frame
             frame_timestamp_ms = round(self.timestamp*1000)
             mp_image = mp.Image(image_format=self.format, data=mp_frame)
@@ -326,13 +357,15 @@ class HybridOAKMediapipeDetector():
             self.new_frame = False
         return self.hands_predictions
     
-    def get_hands_live_stream(self):
-        if self.frame is not None and self.new_frame:
+    def get_hands_live_stream(self, frame):
+        if frame is not None and self.new_frame:
         # if frame is not None and depthFrame is not None:
             # mp_frame = cv2.cvtColor(cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-            mp_frame = cv2.cvtColor(cv2.flip(self.frame,1), cv2.COLOR_BGR2RGB)
+            mp_frame = cv2.cvtColor(cv2.flip(frame,1), cv2.COLOR_BGR2RGB)
+            # mp_frame = cv2.flip(self.frame,1)
             # mp_frame=self.frame
             frame_timestamp_ms = round(self.timestamp*1000)
+            print('frame_timestamp_ms', frame_timestamp_ms)
             mp_image = mp.Image(image_format=self.format, data=mp_frame)
             self.landmarker.detect_async(mp_image, frame_timestamp_ms)
             self.new_frame = False
@@ -357,50 +390,6 @@ class HandPrediction:
     def depth_point(self):
         return self.landmarks[0,:]
     
-    # def draw(self, img):
-    #     solutions.drawing_utils.draw_landmarks(
-    #     img,
-    #     self.landmarks_proto,
-    #     solutions.hands.HAND_CONNECTIONS,
-    #     solutions.drawing_styles.get_default_hand_landmarks_style(),
-    #     solutions.drawing_styles.get_default_hand_connections_style())
-
-    #     if self.show_handedness:
-    #         # Get the top left corner of the detected hand's bounding box.
-    #         if len(img.shape)<3:
-    #             height, width = img.shape
-    #         else:
-    #             height, width, _ = img.shape
-    #         x_coordinates = [landmark.x for landmark in self.mp_landmarks]
-    #         y_coordinates = [landmark.y for landmark in self.mp_landmarks]
-    #         text_x = int(min(x_coordinates) * width)
-    #         text_y = int(min(y_coordinates) * height) - self.margin
-
-    #         # Draw handedness (left or right hand) on the image.
-    #         cv2.putText(img, f"{self.handedness[0].category_name}",
-    #                     (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
-    #                     self.font_size, self.handedness_text_color, self.font_thickness, cv2.LINE_AA)
-    #     if self.show_roi:
-    #         cv2.rectangle(img, (self.roi[0],self.roi[1]),(self.roi[2],self.roi[3]),self.handedness_text_color)
-
-    #     if self.show_xyz:
-    #         # Get the top left corner of the detected hand's bounding box.z
-            
-    #         #print(f"{self.label} --- X: {self.xyz[0]/10:3.0f}cm, Y: {self.xyz[0]/10:3.0f} cm, Z: {self.xyz[0]/10:3.0f} cm")
-    #         if len(img.shape)<3:
-    #             height, width = img.shape
-    #         else:
-    #             height, width, _ = img.shape
-    #         x_coordinates = [landmark.x for landmark in self.mp_landmarks]
-    #         y_coordinates = [landmark.y for landmark in self.mp_landmarks]
-    #         x0 = int(max(x_coordinates) * width)
-    #         y0 = int(max(y_coordinates) * height) + self.margin
-
-    #         # Draw handedness (left or right hand) on the image.
-    #         cv2.putText(img, f"X:{self.xyz[0]/10:3.0f} cm", (x0+10, y0+20), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (20,180,0), self.font_thickness, cv2.LINE_AA)
-    #         cv2.putText(img, f"Y:{self.xyz[1]/10:3.0f} cm", (x0+10, y0+45), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (255,0,0), self.font_thickness, cv2.LINE_AA)
-    #         cv2.putText(img, f"Z:{self.xyz[2]/10:3.0f} cm", (x0+10, y0+70), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (0,0,255), self.font_thickness, cv2.LINE_AA)
-
 
 class StereoInference:
     def __init__(self, cam_data, resize=False, width=300, heigth=300) -> None:
@@ -470,14 +459,7 @@ def crop_to_rect(frame):
     # print(height, width, delta)
     return frame[0:height, delta:width-delta]
 
-def get_hand_detector(type, device = None, replay= False, replay_data = None, cam_params= None, device_id = None, detect_hands = True, resolution = (1280,720), fps = 30):
+def get_hand_detector( replay= False, replay_data = None, cam_params= None, device_id = None, detect_hands = True, resolution = (1280,720), fps = 30):
 
-    if type == 'mediapipe':
-        hand_detector = MediaPipeMonocularHandDetector(device)
-    elif type == 'monocular_webcam':
-        hand_detector = MediaPipeStereoHandDetector(device)
-    elif type == 'hybridOAKMediapipe':
-        hand_detector = HybridOAKMediapipeDetector(replay = replay, replay_data=replay_data, cam_params=cam_params, device_id=device_id, detect_hands=detect_hands, resolution=resolution, fps=fps)
-    else:
-        hand_detector = OAKHandDetector(device)
+    hand_detector = HybridOAKMediapipeDetector(replay = replay, replay_data=replay_data, cam_params=cam_params, device_id=device_id, detect_hands=detect_hands, resolution=resolution, fps=fps, show_disparity=True, print_rgb_stereo_latency=True)
     return hand_detector

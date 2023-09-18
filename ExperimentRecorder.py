@@ -10,7 +10,7 @@ import pandas as pd
 import os
 
 class ExperimentRecorder:
-    def __init__(self, main_path, hand_detection='hybridOAKMediapipe', device_id = None, resolution=(1280,720), fps=30.0):
+    def __init__(self, main_path, device_id = None, resolution=(1280,720), fps=30.0):
         print(f"Recorder created at {main_path}")
         self.main_path = main_path
         self.cam_label = device_id
@@ -19,7 +19,7 @@ class ExperimentRecorder:
         self.fps = fps
         
         self.fourcc = cv2.VideoWriter_fourcc(*'XVID')
-        self.hand_detector = hd.get_hand_detector(hand_detection, device_id=device_id, detect_hands=False, resolution=resolution, fps=fps)
+        self.hand_detector = hd.HybridOAKMediapipeDetector( device_id=device_id, detect_hands=False, resolution=resolution, fps=fps)
         self.device_data = self.hand_detector.get_device_data()
         res = self.device_data['resolution']
         # self.res = (res[0], res[1])
@@ -31,7 +31,7 @@ class ExperimentRecorder:
         self.recording = False
         print(f'Recorder with {device_id} built.')
         self.img = None
-        obj_path = '/home/emoullet/Images/Captures d’écran/javel.png'
+        obj_path = '.YCBV_test_pictures/javel.png'
         self.obj_img = cv2.imread(obj_path)
 
     def init(self):
@@ -59,7 +59,8 @@ class ExperimentRecorder:
                 
 
             self.img = img
-            self.img[:self.obj_img.shape[0], :self.obj_img.shape[1]] = self.obj_img
+            if self.obj_img is not None:
+                self.img[:self.obj_img.shape[0], :self.obj_img.shape[1]] = self.obj_img
             if self.recording:
                 t = pd.Timestamp.now()
                 self.time_series.append(t)

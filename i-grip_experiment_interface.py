@@ -14,16 +14,11 @@ import Experiment as ex
 import argparse
 _DEFAULT_MAIN_PATH = "/home/emoullet/Documents/i-GRIP/DATA"
 
+
 class ExperimentInterface:
-    MODES = ["Recording", "Replaying", "Analysing"]
     def __init__(self,mode = None):     
-        if mode not in self.MODES:
-            raise ValueError(f"Mode {mode} not supported. Supported modes are {self.MODES}")
-        else:
-            self.mode = mode
         self.name = f"i-GRIP {mode} Interface"
         self.experiment = ex.Experiment(name = self.name, mode = mode)
-
         self.build_window()
         self.params_separator = ';'
         
@@ -197,11 +192,12 @@ class ExperimentInterface:
         
     def select_folder(self):
         #set experiment path
-        self.experiment.set_path(self.tk_main_path.get())
-        print(f"Selected main path: {self.main_path}")
-        # read available sessions 
-        sessions_options = self.experiment.fetch_sessions()
-        self.build_session_layout(sessions_options)
+        procede = self.experiment.set_path(self.tk_main_path.get())
+        if procede:
+            print(f"Selected main path: {self.main_path}")
+            # read available sessions 
+            sessions_options = self.experiment.fetch_sessions()
+            self.build_session_layout(sessions_options)
 
         
     def select_session(self, selected_session):
@@ -397,7 +393,7 @@ class ExperimentRecordingInterface(ExperimentInterface):
             if device_check.instate(['selected']):
                 self.selected_devices_ids.append(device_check.cget("text").split(" ")[1])
         print(f"Selected devices: {self.selected_devices_ids}")
-        recording_parameters = {"devices_ids": self.selected_devices_ids, "resolution": self.resolution, "fps": int(self.fps_var.get())}
+        recording_parameters = {"devices_ids": self.selected_devices_ids, "resolution": self.resolution, "fps": [int(self.fps_var.get())]}
         self.experiment.set_session_recording_parameters(recording_parameters)
     
     def prepare_folder(self, new_folder, erase = False):
@@ -442,7 +438,7 @@ class ExperimentRecordingInterface(ExperimentInterface):
     
     def save_experimental_parameters(self):
         self.update_experimental_parameters()
-        self.experiment.save_session_parameters()
+        self.experiment.save_session_experimental_parameters()
     
     def validate_experiment_parameters(self):
         self.update_experimental_parameters()
@@ -477,6 +473,7 @@ class ExperimentReplayInterface(ExperimentInterface):
     def __init__(self):
         super().__init__(mode = "Replay")
         self.pseudo_button_default_state = ['!alternate']
+        print("Building replay interface")
     
     def build_participants_layout(self):
         if self.participants_frame is not None:
@@ -510,13 +507,26 @@ class ExperimentReplayInterface(ExperimentInterface):
         self.pre_process_participants_button.pack(pady=10)
         self.pre_process_participants_button.config(state="disabled")
         
-    def select_session(self, selected_session):
-        super().select_session(selected_session)    
-        for entry in self.parameters_entry_dict:
+    def build_experimental_parameters_layout(self):
+        last_row = super().build_experimental_parameters_layout_from_list()
+        for entry in self.parameters_entry_dict.values():
             entry.config(state="disabled")
+        return last_row
+    
+    def select_session(self, selected_session):
+        super().select_session(selected_session)
+        session_label = self.experiment.get_session_label()
+        params = self.experiment.get_session_experimental_parameters()  
+        if params is None:
+            messagebox.showerror("Error", "The selected session does not have a parameters file")
+            return
+        else:       
+            self.build_experimental_parameters_layout()
+            self.display_session_experimental_parameters(params) 
+            self.build_participants_layout()
+            self.load_participants()
+            self.session_text.set(session_label)
             
-        self.build_participants_layout()
-        self.load_participants()
             
     def load_participants(self):       
         self.participants = self.experiment.get_session_participants()
@@ -699,7 +709,7 @@ def kill_gpu_processes():
 if __name__ == "__main__":
     kill_gpu_processes()
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', choices=['record', 'replay', 'analysis'], default = 'record', help="Mode of the interface")
+    parser.add_argument('-m', '--mode', choices=['record', 'replay', 'analysis'], default = 'replay', help="Mode of the interface")
     args = vars(parser.parse_args())
     if args['mode'] == 'record':
         interface = ExperimentRecordingInterface()

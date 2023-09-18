@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 from i_grip import databases_utils as db
 from i_grip import Scene as sc
 import ExperimentRecorder as erc
+import ExperimentReplayer as erp
 import threading
 import cv2
 import pandas as pd
@@ -20,7 +21,11 @@ _DEFAULT_MAIN_PATH = "/home/emoullet/Documents/i-GRIP/DATA"
 def get_row_and_column_index_from_index(index, nb_items_total):
     # get the number of rows and columns, knowing that the number of columns and rows should be as close as possible
     nb_rows = int(np.sqrt(nb_items_total))
+    if nb_rows == 0:
+        nb_rows = 1
     nb_columns = int(np.ceil(nb_items_total / nb_rows))
+    if nb_columns == 0:
+        nb_columns = 1
     row_index = index // nb_columns
     column_index = index % nb_columns
     return row_index, column_index
@@ -29,7 +34,7 @@ def get_row_and_column_index_from_index(index, nb_items_total):
 class Experiment:
     #TODO : move option verbose in session class
     SESSION_OPTIONS = ["Session 1: Offline recordings", "Session 2: Online, static objects", "Session 3: Online, moving objects"]
-    MODES = ["Recording", "Replaying", "Analysing"]
+    MODES = ["Recording", "Replay", "Analysis"]
     def __init__(self, name = None, win = None, mode=None) -> None:
         if mode not in self.MODES:
             raise ValueError(f"Mode {mode} not supported. Supported modes are {self.MODES}")
@@ -41,7 +46,12 @@ class Experiment:
         self.win = win 
         
     def set_path(self, path):
-        self.path = path
+        path_exists = os.path.exists(path)
+        if not path_exists:
+            messagebox.showinfo("Experiment folder not found", f"Experiment folder not found in {path}, please check the path you wrote.")
+        else:
+            self.path = path
+        return path_exists
         
     def fetch_sessions(self):
         if self.mode == 'Recording':
@@ -52,8 +62,15 @@ class Experiment:
             self.session_folders = [f for f in os.listdir(self.path) if os.path.isdir(os.path.join(self.path, f)) and f.startswith("Session_")]        
             self.session_folders.sort()
             # get the list of session indexes, e.g. [1, 2, 3]
-            self.sessions_indexes = [int(session_folder.split("_")[1]) for session_folder in self.session_folders]
-            self.sessions_options = [self.SESSION_OPTIONS[index - 1] for index in self.sessions_indexes]
+            self.sessions_indexes = []
+            self.sessions_options = []
+            for session_folder in self.session_folders:
+                try:
+                    session_index = int(session_folder.split("_")[1])
+                    self.sessions_indexes.append(session_index)
+                    self.sessions_options.append(self.SESSION_OPTIONS[session_index - 1])
+                except:
+                    print(f"Session folder {session_folder} does not follow the naming convention 'Session_X', with X an integer")
             #TODO : return only sessions with participants
             # self.sessions = [Session(self.path, index,  mode = self.mode) for index in self.sessions_indexes]
             return self.sessions_options
@@ -91,10 +108,10 @@ class Experiment:
     
     def set_session_recording_parameters(self, parameters):
         self.selected_session.set_recording_parameters(parameters)
-        
-    def save_session_parameters(self):
-        self.selected_session.save_experimental_parameters()
         self.selected_session.save_recording_parameters()
+        
+    def save_session_experimental_parameters(self):
+        self.selected_session.save_experimental_parameters()
     
     def get_session_participants(self):
         return self.selected_session.get_participants() 
@@ -248,7 +265,7 @@ class Session:
             answer = messagebox.askyesno(f"Pseudos-participants database not found", "Pseudos-participants not found, please check the session folder. Do you want to create a new one?")
             if answer :
                 self.participants_pseudos_database = pd.DataFrame(columns=self._PARTICIPANTS_PSEUDOS_DATABASE_HEADER)
-                self.participants_pseudos_database.to_csv(os.path.join(self.path, f"{self.label}{self._PARTICIPANTS_PSEUDOS_DATABASE_FILE_SUFFIX}"), index=False)
+                self.participants_pseudos_database.to_csv(os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_PSEUDOS_DATABASE_FILE_SUFFIX}"), index=False)
                 print(f"New Pseudos-participants database created")
             else:
                 self.missing_data.append('pseudo-participant database')
@@ -258,14 +275,14 @@ class Session:
             print(f"Pseudos-participants database imported from '{pseudos_csv_path}'")
     
     def import_participants_database(self):
-        participants_csv_path = os.path.join(self.path, f"{self.label}{self._PARTICIPANTS_DATABASE_FILE_SUFFIX}")        
+        participants_csv_path = os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_DATABASE_FILE_SUFFIX}")        
         if not os.path.exists(participants_csv_path):
             self.participants_database = None
             print(f"No participant database found in {self.path}")
             answer = messagebox.askyesno(f"Participants database not found", "Participants database not found, please check the session folder. Do you want to create a new one?")
             if answer :
                 self.participants_database = pd.DataFrame(columns=self._PARTICIPANTS_DATABASE_HEADER)
-                self.participants_database.to_csv(os.path.join(self.path, f"{self.label}{self._PARTICIPANTS_DATABASE_FILE_SUFFIX}"), index=False)
+                self.participants_database.to_csv(os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_DATABASE_FILE_SUFFIX}"), index=False)
                 print(f"New participant database created")
             else:
                 self.missing_data.append('participant database')
@@ -340,7 +357,7 @@ class Session:
         for device_id, device_data in self.devices_data.items():
             print(f"Building experiment replayer for device {device_id} with device_data: resolution {device_data['resolution']}, matrix {device_data['matrix']}")
             self.current_device_id = device_id
-            self.experiment_replayer = erc.ExperimentReplayer(device_id, device_data)
+            self.experiment_replayer = erp.ExperimentReplayer(device_id, device_data)
             self.devices_progress_display.set_current(f"Pre-processing device {device_id}")
             self.progress_window.update_idletasks()
             print("updating progress window")
@@ -386,7 +403,7 @@ class Session:
             if validate_pseudo != 'yes':
                 return self.get_participant(participant_firstname, participant_surname, handedness, location)
             #update the databases
-            date = pd.Timestamp.now().strftime("%Y-%m-%d-%H-%M-%S")
+            date = pd.Timestamp.now()
             self.participants_database.loc[len(self.participants_database)] = [pseudo, date, handedness, location, self.preselect_all_participants, False, False, False, False, False, False, 0]
             self.participants_pseudos_database.loc[len(self.participants_pseudos_database)] = [participant_firstname, participant_surname, pseudo]
             print(f"New participant '{pseudo}' created")
@@ -458,7 +475,7 @@ class Session:
             self.current_participant.close()
             
 class Participant:
-    def __init__(self, pseudo, session_path, session_experimental_parameters, recording_parameters, mode = 'Recording') -> None:
+    def __init__(self, pseudo, session_path, session_experimental_parameters=None, recording_parameters=None, mode = 'Recording') -> None:
         self.pseudo = pseudo
         self.experimental_parameters = session_experimental_parameters
         self.recording_parameters = recording_parameters
@@ -571,11 +588,14 @@ class Participant:
             self.expe_recorders.append(expe_recorder)
     
     def initiate_experiment(self):
+        self.trial_ongoing = False
         devices_ids = self.recording_parameters['devices_ids']
         resolution = self.recording_parameters['resolution']
-        fps = self.recording_parameters['fps']
+        fps = self.recording_parameters['fps'][0]
         self.build_UIs()
-        self.build_recorders(devices_ids, resolution, fps)      
+        self.build_recorders(devices_ids, resolution, fps)   
+        self.save_experimental_parameters()
+        self.save_recording_parameters()   
         
     def start_experiment(self):
         self.trial_ongoing = False
@@ -767,7 +787,7 @@ class Participant:
         
     
     def save_experimental_parameters(self):
-        csv_path = os.path.join(self.path, f'{self.pseudo}{self._EXPERIMENTAL_PARAMETERS_SUFFIX}')
+        csv_path = os.path.join(self.path, f'{self.pseudo}{Session._EXPERIMENTAL_PARAMETERS_SUFFIX}')
         #check if the file already exists
         if os.path.exists(csv_path):
             overwrite = messagebox.askyesno("File already exists", f"File {csv_path} already exists. Do you want to overwrite it?")
@@ -787,7 +807,7 @@ class Participant:
         print(f"Parameters written to '{csv_path}'")
         
     def save_recording_parameters(self):
-        csv_path = os.path.join(self.path, f'{self.pseudo}{self._RECORDING_PARAMETERS_SUFFIX}')
+        csv_path = os.path.join(self.path, f'{self.pseudo}{Session._RECORDING_PARAMETERS_SUFFIX}')
         #check if the file already exists
         if os.path.exists(csv_path):
             overwrite = messagebox.askyesno("File already exists", f"File {csv_path} already exists. Do you want to overwrite it?")
