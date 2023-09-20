@@ -50,7 +50,7 @@ class HybridOAKMediapipeDetector():
             show_disparity (bool, optional): _description_. Defaults to False.
         """
         self.type = 'HybridOAKMediapipeDetector'
-        self.cam_auto_mode = True
+        self.cam_auto_mode = False
         self.device_id = device_id
         self.replay = replay
         self.fps = fps
@@ -185,7 +185,8 @@ class HybridOAKMediapipeDetector():
         controlIn.out.link(camRgb.inputControl)
 
         camRgb.setBoardSocket(dai.CameraBoardSocket.RGB)
-        camRgb.setInterleaved(False)
+        camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.RGB)
+        # camRgb.setInterleaved(False)
         camRgb.setIspScale(2, 3)
         if self.cam_auto_mode:
             camRgb.initialControl.setAutoExposureEnable()
@@ -197,6 +198,7 @@ class HybridOAKMediapipeDetector():
         # cam.setIspScale(self.scale_nd[0], self.scale_nd[1])
         camRgb.setFps(self.fps)
         camRgb.setPreviewSize(self.cam_data['resolution'][0], self.cam_data['resolution'][1])
+        # camRgb.setVideoSize(self.cam_data['resolution'][0], self.cam_data['resolution'][1])
 
         
         camLeft = pipeline.create(dai.node.MonoCamera)
@@ -213,9 +215,9 @@ class HybridOAKMediapipeDetector():
         self.cam_out = pipeline.createXLinkOut()
         self.cam_out.setStreamName("rgb")
         ### uncommenting decreases rgb latency, but since stereo has bigger latency, keeping them commented decreases overall latency between rgb and stereo
-        # self.cam_out.input.setQueueSize(1)
-        # self.cam_out.input.setBlocking(False)
-        camRgb.preview.link(self.cam_out.input)
+        self.cam_out.input.setQueueSize(1)
+        self.cam_out.input.setBlocking(False)
+        camRgb.isp.link(self.cam_out.input)
 
         # Create StereoDepth node that will produce the depth map
         stereo = pipeline.create(dai.node.StereoDepth)
@@ -270,35 +272,6 @@ class HybridOAKMediapipeDetector():
                     hands_preds.append(hand)
             self.hands_predictions = hands_preds
 
-    # def draw_landmarks_on_image(self, rgb_image): #TODO : MODIFY BY HAND
-    #     if len(self.hands)>0:
-    #         annotated_image = np.copy(rgb_image)
-    #         for hand in self.hands:
-    #             solutions.drawing_utils.draw_landmarks(
-    #             annotated_image,
-    #             hand.landmarks_proto,
-    #             solutions.hands.HAND_CONNECTIONS,
-    #             solutions.drawing_styles.get_default_hand_landmarks_style(),
-    #             solutions.drawing_styles.get_default_hand_connections_style())
-
-    #             # Get the top left corner of the detected hand's bounding box.
-    #             if len(annotated_image.shape)<3:
-    #                 height, width = annotated_image.shape
-    #             else:
-    #                 height, width, _ = annotated_image.shape
-    #             x_coordinates = [landmark.x for landmark in hand.landmarks]
-    #             y_coordinates = [landmark.y for landmark in hand.landmarks]
-    #             text_x = int(min(x_coordinates) * width)
-    #             text_y = int(min(y_coordinates) * height) - self.margin
-
-    #             # Draw handedness (left or right hand) on the image.
-    #             cv2.putText(annotated_image, f"{hand.handedness[0].category_name}",
-    #                         (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
-    #                         self.font_size, self.handedness_text_color, self.font_thickness, cv2.LINE_AA)
-    #         return annotated_image
-    #     else:
-    #         return rgb_image
-        
     def next_frame_video(self):
         ret, frame = self.video.read()
         self.frame = frame
@@ -336,6 +309,7 @@ class HybridOAKMediapipeDetector():
             # frame = cv2.resize(frame, self.cam_data['resolution']) 
             # frame=cv2.flip(frame,1)
             # print(frame.shape)
+            cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             success = True
             self.frame = frame
             self.new_frame = True
@@ -343,12 +317,12 @@ class HybridOAKMediapipeDetector():
             self.frame = None
         return success, frame
 
-    def get_hands_video(self):
-        if self.frame is not None and self.new_frame:
+    def get_hands_video(self, frame):
+        if frame is not None and self.new_frame:
         # if frame is not None and depthFrame is not None:
             # mp_frame = cv2.cvtColor(cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
             # mp_frame = cv2.cvtColor(cv2.flip(self.frame,1), cv2.COLOR_BGR2RGB) 
-            mp_frame = cv2.flip(self.frame,1)
+            mp_frame = cv2.flip(frame,1)
             # mp_frame=self.frame
             frame_timestamp_ms = round(self.timestamp*1000)
             mp_image = mp.Image(image_format=self.format, data=mp_frame)
@@ -361,11 +335,11 @@ class HybridOAKMediapipeDetector():
         if frame is not None and self.new_frame:
         # if frame is not None and depthFrame is not None:
             # mp_frame = cv2.cvtColor(cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-            mp_frame = cv2.cvtColor(cv2.flip(frame,1), cv2.COLOR_BGR2RGB)
-            # mp_frame = cv2.flip(self.frame,1)
+            # mp_frame = cv2.cvtColor(cv2.flip(frame,1), cv2.COLOR_BGR2RGB)
+            mp_frame = cv2.flip(frame,1)
             # mp_frame=self.frame
-            frame_timestamp_ms = round(self.timestamp*1000)
-            print('frame_timestamp_ms', frame_timestamp_ms)
+            frame_timestamp_ms = round(time.time()*1000)
+            # print('frame_timestamp_ms', frame_timestamp_ms)
             mp_image = mp.Image(image_format=self.format, data=mp_frame)
             self.landmarker.detect_async(mp_image, frame_timestamp_ms)
             self.new_frame = False

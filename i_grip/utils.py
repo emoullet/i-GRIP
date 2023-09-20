@@ -268,8 +268,13 @@ class GraspingHandState:
         if isinstance(new_input, HandPrediction):
             self.update_position(new_input.position)
             self.update_landmarks(new_input.landmarks)
-        if isinstance(new_input, Position):
+        elif isinstance(new_input, Position):
             self.update_position(new_input)
+        elif new_input is None:
+            self.update_landmarks(new_input)
+        else:
+            print(f'weird input : {new_input}')
+        print(f'updated with {type(new_input)} : {new_input}')
         self.was_updated = True
         
     def propagate(self, timestamp):
@@ -315,7 +320,7 @@ class GraspingHandState:
             
             self.landmarks_velocity_filtered = self.filter_landmarks_velocity.apply(self.landmarks_velocity)
             
-            self.landmarks = next_landmarks
+        self.landmarks = next_landmarks
     
     def as_list(self, timestamp=True, position=False, landmarks=False, velocity=False, landmarks_velocity=False, filtered_position=False, filtered_velocity=False, filtered_landmarks=False, filtered_landmarks_velocity=False, normalized_velocity=False, scalar_velocity=False):
         repr_list = []

@@ -30,8 +30,8 @@ class KnownObjectPoseEstimator:
         if(dataset == "ycbv"):
             object_coarse_run_id = 'coarse-bop-ycbv-synt+real--822463'
             object_refiner_run_id = 'refiner-bop-ycbv-synt+real--631598'
-            object_coarse_run_id = 'coarse-bop-ycbv-pbr--724183'
-            object_refiner_run_id = 'refiner-bop-ycbv-pbr--604090'
+            # object_coarse_run_id = 'coarse-bop-ycbv-pbr--724183'
+            # object_refiner_run_id = 'refiner-bop-ycbv-pbr--604090'
         elif(dataset == "tless"):
             object_coarse_run_id = 'coarse-bop-tless-synt+real--160982'
             object_refiner_run_id = 'refiner-bop-tless-synt+real--881314'
@@ -63,13 +63,14 @@ class KnownObjectPoseEstimator:
             self.predict = self.pose_predictor.get_predictions
 
     def estimate(self, image, detections = None):
-
+        if image is None:
+            return {}
         # Predict poses using cosypose
         #print(detections)
         predict = self.pose_estimation_prior is not None or detections is not None
         if predict:
             # image = torch.as_tensor(np.stack([self.format_crop(image), ])).permute(0, 3, 1, 2).cuda().float() / 255
-            image = torch.as_tensor(np.stack([image, ])).permute(0, 3, 1, 2).cuda().float() / 255
+            img = torch.as_tensor(np.stack([image, ])).permute(0, 3, 1, 2).cuda().float() / 255
             if detections is not None and not self.fuse_detections:
             #if detections is not None:
                 self.pose_estimation_prior = None
@@ -84,7 +85,7 @@ class KnownObjectPoseEstimator:
                 n_coarse_iterations = 0
 
             self.pose_predictions, _ = self.predict(
-                images=image, K=self.K,
+                images=img, K=self.K,
                 data_TCO_init=self.pose_estimation_prior,
                 n_coarse_iterations=n_coarse_iterations,
                 n_refiner_iterations=self.n_refiner_iterations,

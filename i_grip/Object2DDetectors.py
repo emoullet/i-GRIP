@@ -56,7 +56,10 @@ class Object2DDetector:
         self.detections_windows = self.detector_windows(self.image_full,**self.detector_kwargs)
 
 
-    def detect(self, image):        
+    def detect(self, image): 
+        if image is None:
+            return None
+        print('DETECTING')       
         #print(self.windows)
         # print('ITERATION NUMBER '+str(self.it+1))
         # os.system('nvidia-smi | grep python')
@@ -134,7 +137,7 @@ class Object2DDetector:
         if self.detections is not None:
             if len(self.detections)<=0 :
                 self.detections=None
-            # else:                
+            # else:y                
                 # cv2.imshow('image',image)
                 # cv2.waitKey(1)
         return self.detections

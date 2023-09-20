@@ -13,7 +13,7 @@ class ExperimentReplayer:
         self.resolution = resolution
         self.fps = fps
         
-        dataset = "ycbv"        
+        dataset = "tless"        
         self.display_replay = display_replay
         self.hand_detector = hd.HybridOAKMediapipeDetector(replay=True, cam_params= device_data, resolution=resolution, fps=fps)
         self.object_detector = o2d.get_object_detector(dataset,
@@ -44,11 +44,13 @@ class ExperimentReplayer:
         
         for timestamp in self.hand_detector.get_timestamps():
             success, img = self.hand_detector.next_frame()
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            img.flags.writeable = False
             if not success:
                 continue
 
             # Hand detection
-            hands = self.hand_detector.get_hands()
+            hands = self.hand_detector.get_hands(img)
             self.scene.update_hands(hands, timestamp)
 
             # Object detection

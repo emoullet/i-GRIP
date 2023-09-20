@@ -40,7 +40,7 @@ class GraspingDetector:
             start_flag = start_event.wait(1)
             if start_flag:
                 if estimate_event.wait(1):
-                    self.objects_pose = self.object_pose_estimator.estimate(self.rgb_img, detections = self.object_detections)
+                    self.objects_pose = self.object_pose_estimator.estimate(self.img_to_process, detections = self.object_detections)
                     self.scene.update_objects(self.objects_pose)
 
     def detect_objects_task(self, start_event, detect_event, estimate_event):
@@ -50,7 +50,7 @@ class GraspingDetector:
                 detect_flag = detect_event.wait(1)
                 if detect_flag:
                     # self.object_detections = self.object_detector.detect(cv2.flip(self.img,1))
-                    self.object_detections = self.object_detector.detect(self.rgb_img)
+                    self.object_detections = self.object_detector.detect(self.img_to_process)
                     if self.object_detections is not None:
                         detect_event.clear()
                         estimate_event.set()
@@ -78,18 +78,15 @@ class GraspingDetector:
         while self.hand_detector.isOn():
             success, img = self.hand_detector.next_frame()
             if not success:
-                self.img = None
+                self.img_to_process = None
                 continue     
             else:
                 render_img = img.copy()
-                self.img = img.copy()
-                self.img = cv2.cvtColor(self.img, cv2.COLOR_BGR2RGB)
+                self.img_to_process = img.copy()
+                cv2.cvtColor(self.img_to_process, cv2.COLOR_RGB2BGR, self.img_to_process)
+                self.img_to_process.flags.writeable = False
+                
                 #replace pixels from self.img with obj_img
-                # self.img = img
-                rgb_img = cv2.cvtColor(obj_img.copy(), cv2.COLOR_BGR2RGB)
-                # rgb_img = obj_img.copy()
-                self.img = img.copy()
-                self.rgb_img = img.copy()
                 if started:
                     start_event.set()
                     detect_event.set()
@@ -98,14 +95,6 @@ class GraspingDetector:
                 estimate_event.set()                
                 estimate_event.clear()
                 
-                # self.img = img
-                # print('img shape', self.img.dtype)
-                self.img[:obj_img.shape[0], :obj_img.shape[1]] = obj_img
-                self.rgb_img[:obj_img.shape[0], :obj_img.shape[1]] = rgb_img
-                self.rgb_img.flags.writeable = False
-                cv2.imshow('rgb_img', self.rgb_img)
-                # v2.cvtColor(self.img, cv2.COLOR_BGR2RGB, self.img)
-            self.img.flags.writeable = True
             k = cv2.waitKey(1)
             # if k == 32:
             #     print('DOOOOOOOOOOOOOOOOOOOO')

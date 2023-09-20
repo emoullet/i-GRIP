@@ -686,7 +686,7 @@ class GraspingHand(Entity):
 
     def build_from_hand_prediction(self, hand_prediction):
         self.__dict__= hand_prediction.__dict__
-        if isinstance(hand_prediction, i-grip.HandDetectors.HandPrediction):
+        if isinstance(hand_prediction, i_grip.HandDetectors.HandPrediction):
             self.draw = hand_prediction.draw
         self.base_dict = hand_prediction.__dict__
         

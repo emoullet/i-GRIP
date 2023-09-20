@@ -35,13 +35,13 @@ class HandDetector:
                 self.img = None
                 continue     
             else:
-                cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                cv2.cvtColor(img, cv2.COLOR_RGB2BGR, img)
                 img.flags.writeable = False
                 hands = self.hand_detector.get_hands(img)
                 if hands is not None and len(hands)>0:
                     self.scene.update_hands(hands)
                 img.flags.writeable = True
-                cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                cv2.cvtColor(img, cv2.COLOR_BGR2RGB, img)
             self.scene.render(img)
             cv2.imshow(f'view',img)
             k = cv2.waitKey(1)

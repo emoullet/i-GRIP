@@ -32,7 +32,7 @@ class ExperimentRecorder:
         print(f'Recorder with {device_id} built.')
         self.img = None
         obj_path = '.YCBV_test_pictures/javel.png'
-        self.obj_img = cv2.imread(obj_path)
+        self.obj_img = None
 
     def init(self):
         self.hand_detector.start()

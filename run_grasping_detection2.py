@@ -21,7 +21,7 @@ def report_gpu():
 
 class GraspingDetector:
     def __init__(self, ) -> None:
-        dataset = "tless"
+        dataset = "ycbv"
         self.hand_detector = hd.HybridOAKMediapipeDetector()
         cam_data = self.hand_detector.get_device_data()
         self.object_detector = o2d.get_object_detector(dataset,
@@ -34,14 +34,14 @@ class GraspingDetector:
                               name = 'Full tracking')
         self.object_detections = None
         self.is_hands= False
-        self.img = None
+        self.img_for_objects = None
 
     def estimate_objects_task(self, start_event, estimate_event):
         while self.hand_detector.isOn():
             start_flag = start_event.wait(1)
             if start_flag:
                 if estimate_event.wait(1):
-                    self.objects_pose = self.object_pose_estimator.estimate(self.img, detections = self.object_detections)
+                    self.objects_pose = self.object_pose_estimator.estimate(self.img_for_objects, detections = self.object_detections)
                     self.scene.update_objects(self.objects_pose)
                     estimate_event.clear()
 
@@ -52,7 +52,7 @@ class GraspingDetector:
                 detect_flag = detect_event.wait(1)
                 if detect_flag:
                     # self.object_detections = self.object_detector.detect(cv2.flip(self.img,1))
-                    self.object_detections = self.object_detector.detect(self.img)
+                    self.object_detections = self.object_detector.detect(self.img_for_objects)
                     if self.object_detections is not None:
                         detect_event.clear()
                         estimate_event.set()
@@ -80,23 +80,42 @@ class GraspingDetector:
             k = cv2.waitKey(2)
             success, img = self.hand_detector.next_frame()
             if not success:
-                self.img = None
+                self.img_for_objects = None
                 continue     
             else:
+                img_for_hands = img.copy()
+                cv2.cvtColor(img_for_hands, cv2.COLOR_RGB2BGR, img_for_hands)
+                img.flags.writeable = False
+                if estimate_event.is_set() or detect_event.is_set():
+                    self.img_for_objects = img.copy()
+                    cv2.cvtColor(self.img_for_objects, cv2.COLOR_RGB2BGR, self.img_for_objects)
+                    self.img_for_objects.flags.writeable = False
                 if started:
                     start_event.set()
                     detect_event.set()
                     started = False
-                cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-                img.flags.writeable = False
-                hands = self.hand_detector.get_hands(img)
                 if not estimate_event.is_set():
                     estimate_event.set()
+                hands = self.hand_detector.get_hands(img_for_hands)
                 if hands is not None and len(hands)>0:
                     self.scene.update_hands(hands)
-                img.flags.writeable = True
-                cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-                self.img = img.copy()
+                
+                # Avant de commencer à utiliser la mémoire GPU
+                torch.cuda.empty_cache()  # Pour libérer toute mémoire inutilisée
+
+                # Utilisez cette ligne pour obtenir la mémoire GPU utilisée en octets
+                gpu_memory_used = torch.cuda.memory_allocated()
+
+                # Utilisez cette ligne pour obtenir la mémoire GPU réservée en octets (y compris la mémoire non allouée)
+                gpu_memory_reserved = torch.cuda.memory_reserved()
+
+                # Convertissez les valeurs en méga-octets (Mo) pour une meilleure lisibilité
+                gpu_memory_used_mb = gpu_memory_used / 1024 / 1024
+                gpu_memory_reserved_mb = gpu_memory_reserved / 1024 / 1024
+
+
+                print(f"GPU Memory Used: {gpu_memory_used_mb:.2f} MB")
+                print(f"GPU Memory Reserved: {gpu_memory_reserved_mb:.2f} MB")
                 
             if k == 32:
                 print('DETEEEEEEEEEEEEEEEEEECT')
