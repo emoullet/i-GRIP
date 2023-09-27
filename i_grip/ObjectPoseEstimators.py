@@ -44,7 +44,7 @@ class KnownObjectPoseEstimator:
         self.pose_predictor = load_pose_predictor(object_coarse_run_id,
                                                   object_refiner_run_id,
                                                   preload_cache=True,
-                                                  n_workers=6)
+                                                  n_workers=6 )
         self.pose_predictions = None
         self.pose_estimation_prior = None
         self.use_prior = use_tracking

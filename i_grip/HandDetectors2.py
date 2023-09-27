@@ -50,7 +50,7 @@ class HybridOAKMediapipeDetector():
             show_disparity (bool, optional): _description_. Defaults to False.
         """
         self.type = 'HybridOAKMediapipeDetector'
-        self.cam_auto_mode = False
+        self.cam_auto_mode = True
         self.device_id = device_id
         self.replay = replay
         self.fps = fps
@@ -128,7 +128,7 @@ class HybridOAKMediapipeDetector():
             self.device = dai.Device()
         else:
             self.device = dai.Device(dai.DeviceInfo(self.device_id))
-        self.lensPos = 150
+        self.lensPos = 120
         self.expTime = 8000
         self.sensIso = 400    
         self.wbManual = 4000
@@ -194,7 +194,7 @@ class HybridOAKMediapipeDetector():
             camRgb.initialControl.setManualWhiteBalance(self.wbManual)
             print("Setting manual exposure, time: ", self.expTime, "iso: ", self.sensIso)
             camRgb.initialControl.setManualExposure(self.expTime, self.sensIso)
-            # cam.initialControl.setManualFocus(self.lensPos)
+        camRgb.initialControl.setManualFocus(self.lensPos)
         # cam.setIspScale(self.scale_nd[0], self.scale_nd[1])
         camRgb.setFps(self.fps)
         camRgb.setPreviewSize(self.cam_data['resolution'][0], self.cam_data['resolution'][1])
@@ -362,44 +362,48 @@ class HandPrediction:
         # self.position = self.position/1000
         
     def depth_point(self):
-        return self.landmarks[0,:]
+        return self.normalized_landmarks[0,:]
     
 
 class StereoInference:
-    def __init__(self, cam_data, resize=False, width=300, heigth=300) -> None:
+    def __init__(self, cam_data) -> None:
 
         self.original_width = cam_data['resolution'][0]
+        self.original_height = cam_data['resolution'][1]
         
         self.hfov = cam_data['hfov']
         self.hfov = np.deg2rad(self.hfov)
 
         self.depth_thres_high = 3000
         self.depth_thres_low = 50
+        self.box_size = 10
 
 
     def calc_angle(self, offset):
             return math.atan(math.tan(self.hfov / 2.0) * offset / (self.original_width / 2.0))
 
-    def calc_spatials(self, img_point, depth_map, averaging_method=np.mean):
+    def calc_spatials(self, normalized_img_point, depth_map, averaging_method=np.mean):
         if depth_map is None:
             print('No depth map available yet')
             return np.array([0,0,0]), None
-        box_size = 10
         #box_size = max(5, int(np.linalg.norm(wrist-thumb)))/2
         # print('depth_map.shape',depth_map.shape)
-        xmin = max(int(img_point[0]-box_size),0)
-        xmax = min(int(img_point[0]+box_size), int(depth_map.shape[1]))
-        ymin = max(int(img_point[1]-box_size),0 )
-        ymax = min(int(img_point[1]+box_size), int(depth_map.shape[0]))
+        x = normalized_img_point[0]*self.original_width
+        y = normalized_img_point[1]*self.original_height
+        xmin = max(int(x-self.box_size),0)
+        xmax = min(int(x+self.box_size), int(depth_map.shape[1]))
+        ymin = max(int(y-self.box_size),0 )
+        ymax = min(int(y+self.box_size), int(depth_map.shape[0]))
+        
         if xmin > xmax:  # bbox flipped
             xmin, xmax = xmax, xmin
         if ymin > ymax:  # bbox flipped
             ymin, ymax = ymax, ymin
 
-        if xmin == xmax or ymin == ymax: # Box of size zero
-            print('Box of size zero')
-            print(xmax, xmin, ymax, ymin)
-            return None
+        if xmin == xmax : 
+            xmax = xmin +self.box_size
+        if ymin == ymax :
+            ymax = ymin +self.box_size
 
         # Calculate the average depth in the ROI.
         depthROI = depth_map[ymin:ymax, xmin:xmax]
@@ -413,8 +417,8 @@ class StereoInference:
 
         mid_w = int(depth_map.shape[1] / 2) # middle of the depth img
         mid_h = int(depth_map.shape[0] / 2) # middle of the depth img
-        bb_x_pos = img_point[0] - mid_w
-        bb_y_pos = img_point[1] - mid_h
+        bb_x_pos = x - mid_w
+        bb_y_pos = y - mid_h
         # print('wrist',wrist)
         angle_x = self.calc_angle(bb_x_pos)
         angle_y = self.calc_angle(bb_y_pos)

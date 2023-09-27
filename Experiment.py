@@ -43,6 +43,7 @@ class Experiment:
         self.name = name
         self.running = False
         self.path = None       
+        self.selected_session = None
         self.win = win 
         
     def set_path(self, path):
@@ -124,17 +125,20 @@ class Experiment:
         self.selected_session.import_pseudos_participants_database()
     
     def close(self):
-        self.selected_session.close()
+        if self.selected_session is not None:
+            self.selected_session.close()
 
 class Session:
-    
-    _PARTICIPANTS_DATABASE_HEADER = ["Pseudo", "Date", "Handedness", "Location", "To Pre-process", "Pre-processable", "Pre-processed", "All data available", "Folder available", "Combinations available", "All trial folders available", "Number of trials"]
-    _PARTICIPANTS_PSEUDOS_DATABASE_HEADER = ["FirstName", "Surname", "Pseudo"]
-    
     _PARTICIPANTS_DATABASE_FILE_SUFFIX = "_participants_database.csv"
     _PARTICIPANTS_PSEUDOS_DATABASE_FILE_SUFFIX = "_participants_pseudos_database.csv"
     _EXPERIMENTAL_PARAMETERS_SUFFIX = "_experimental_parameters.csv"
     _RECORDING_PARAMETERS_SUFFIX = "_recording_parameters.csv"
+    _INSTRUCTIONS_LANGUAGES_SUFFIX = "_instructions_languages.csv"
+    
+    _PARTICIPANTS_DATABASE_HEADER = ["Pseudo", "Date", "Handedness", "Location", "To Pre-process", "Pre-processable", "Pre-processed", "All data available", "Folder available", "Combinations available", "All trial folders available", "Number of trials"]
+    _PARTICIPANTS_PSEUDOS_DATABASE_HEADER = ["FirstName", "Surname", "Pseudo"]
+    _SUPPORTED_LANGUAGES = ["French", "English"]
+    _INSTRUCTIONS_LANGUAGES_HEADER = ["Label"] + _SUPPORTED_LANGUAGES
     
     def __init__(self, experiment_path, index, mode = 'Recording') -> None:
         self.index = index
@@ -167,9 +171,10 @@ class Session:
         
         else:                
             print(f"Reading session {self.label} folder at {self.path}")
-            self.read_experimental_parameters()
             self.import_participants_database()
             self.import_pseudos_participants_database()
+            self.import_instructions_languages()
+            self.read_experimental_parameters()
     
         print(f"Selected session: {self.label}")
         if self.mode != 'Recording':
@@ -235,13 +240,43 @@ class Session:
     
     def set_experimental_parameters(self, parameters):
         self.experimental_parameters = parameters
+        save_instructions = False
+        for param_list in self.experimental_parameters.values():
+            for param in param_list:
+                #check if param is a blank string
+                if param == '':
+                    continue
+                if param not in self.instructions_languages['Label'].values:
+                    print(self.instructions_languages)
+                    self.instructions_languages.loc[len(self.instructions_languages)] = [param]+[None for l in self._SUPPORTED_LANGUAGES]
+                    for language in self._SUPPORTED_LANGUAGES:
+                        self.ask_param_instructions(param, language)
+                        save_instructions = True
+        if save_instructions:
+            self.save_instructions_languages()
+                    
+    def ask_param_instructions(self, param, language):                    
+        self.instructions_window = tk.Toplevel()
+        size = "700x200"
+        self.instructions_window.geometry(size)
+        requirements_label = ttk.Label(self.instructions_window, text=f"Parameter '{param}' was not found in our database {self.instructions_languages_csv_path}. \n Please enter the corresponding instructions for the language {language}")
+        requirements_label.pack()
+        instructions_entry = ttk.Entry(self.instructions_window)
+        instructions_entry.pack()
+        validate_button = ttk.Button(self.instructions_window, text="Validate", command=lambda: self.add_instructions(param, language, instructions_entry.get()))
+        validate_button.pack()
+        self.instructions_window.wait_window()
+            
+    def add_instructions(self, param, language, instructions):
+        self.instructions_languages.loc[len(self.instructions_languages)] = [param, language, instructions]
+        self.instructions_window.destroy()
     
     def read_recording_parameters(self):
-        csv_path = os.path.join(self.path, f'{self.label}{self._RECORDING_PARAMETERS_SUFFIX}')
+        csv_path = os.path.join(self.path, f'{self.folder}{self._RECORDING_PARAMETERS_SUFFIX}')
         if not os.path.exists(csv_path):
             self.recording_parameters = None
             print(f"Recording parameters file not found in {csv_path}, please check the session folder.")
-            messagebox.showinfo("Recording parameters file not found", f"{self.label} recording parameters file not found in {self.path}, please check the session folder.")
+            messagebox.showinfo("Recording parameters file not found", f"{self.folder} recording parameters file not found in {self.path}, please check the session folder.")
             self.all_data_available = False
             self.missing_data.append('recording parameters')
         else:
@@ -258,7 +293,7 @@ class Session:
         self.recording_parameters = recording_parameters
     
     def import_pseudos_participants_database(self):
-        pseudos_csv_path = os.path.join(self.path, f"{self.label}{self._PARTICIPANTS_PSEUDOS_DATABASE_FILE_SUFFIX}")        
+        pseudos_csv_path = os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_PSEUDOS_DATABASE_FILE_SUFFIX}")        
         if not os.path.exists(pseudos_csv_path):
             self.participants_pseudos_database = None
             print(f"No Pseudos-participant database found in {self.path}")
@@ -273,6 +308,7 @@ class Session:
         else:
             self.participants_pseudos_database = pd.read_csv(pseudos_csv_path)
             print(f"Pseudos-participants database imported from '{pseudos_csv_path}'")
+            print(f"Pseudos-participants database: \n{self.participants_pseudos_database}")
     
     def import_participants_database(self):
         participants_csv_path = os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_DATABASE_FILE_SUFFIX}")        
@@ -305,6 +341,24 @@ class Session:
                 self.participants_database.loc[index, 'Combinations available'] = participant.is_combinations_available()
                 self.participants_database.loc[index, 'All trial folders available'] = participant.is_all_trial_folders_available()
                 self.participants_database.loc[index, 'Number of trials'] = participant.get_number_of_trials()
+            
+    def import_instructions_languages(self):
+        self.instructions_languages_csv_path = os.path.join(self.path, f"{self.folder}{self._INSTRUCTIONS_LANGUAGES_SUFFIX}")
+        if not os.path.exists(self.instructions_languages_csv_path):
+            self.instructions_languages = None
+            print(f"No instructions languages database found in {self.path}")
+            answer = messagebox.askyesno(f"Instructions languages database not found", "Instructions languages database not found, please check the session folder. Do you want to create a new one?")
+            if answer :
+                self.instructions_languages = pd.DataFrame(columns=self._INSTRUCTIONS_LANGUAGES_HEADER)
+                self.instructions_languages.loc[len(self.instructions_languages)] = ['Welcome',  "BIENVENUE DANS L'EXPERIENCE I-GRIP", "WELCOME TO THE I-GRIP EXPERIMENT"]
+                self.save_instructions_languages()
+                print(f"New instructions languages database created")
+            else:
+                self.missing_data.append('instructions languages database')
+            self.all_data_available = False
+        else:
+            self.instructions_languages = pd.read_csv(self.instructions_languages_csv_path)
+            print(f"Instructions languages database imported from '{self.instructions_languages_csv_path}'")
             
     def extract_devices_data(self):
         print("Extracting devices data...")
@@ -394,7 +448,7 @@ class Session:
         #TODO
         pass
     
-    def get_participant(self, participant_firstname, participant_surname, handedness, location):
+    def get_participant(self, participant_firstname, participant_surname, handedness, location, language = 'English'):
         #check if the pseudo already exists
         pseudo_in_db = db.check_participant_in_database(participant_firstname, participant_surname, self.participants_pseudos_database)
         if not pseudo_in_db:
@@ -405,19 +459,22 @@ class Session:
             #update the databases
             date = pd.Timestamp.now()
             self.participants_database.loc[len(self.participants_database)] = [pseudo, date, handedness, location, self.preselect_all_participants, False, False, False, False, False, False, 0]
+            print(f"self.participants_pseudos_database ici: {self.participants_pseudos_database}")
             self.participants_pseudos_database.loc[len(self.participants_pseudos_database)] = [participant_firstname, participant_surname, pseudo]
+            print(f"self.participants_pseudos_database là: {self.participants_pseudos_database}")
             print(f"New participant '{pseudo}' created")
             #TODO
         else:
             print(f"Participant {participant_firstname} {participant_surname} already exists")
             load_existing_participant = messagebox.askquestion("Existing Participant", f"Participant {participant_firstname} {participant_surname} already registered in the database, with pseudo {pseudo_in_db}. Do you want to load its data to complete it if needed?")
             if load_existing_participant != 'yes':
-                return
+                return None
             else:
                 pseudo = pseudo_in_db 
                 print(f"Participant {participant_firstname} {participant_surname} selected to complete its trials")
         print(f'Session database counts now {len(self.participants_database)} participants')
-        self.current_participant = Participant(pseudo, self.path, self.experimental_parameters, self.recording_parameters, mode=self.mode)
+        self.current_participant = Participant(pseudo, self.path, self.experimental_parameters, self.recording_parameters, mode=self.mode, language=language)
+        self.current_participant.set_instructions(self.instructions_languages)
         return pseudo
     
     def save_databases(self):
@@ -469,13 +526,16 @@ class Session:
                 params.append([param_type]+param_list)
             writer.writerows(params,)
         print(f"Parameters written to '{csv_path}'")
+        
+    def save_instructions_languages(self):        
+        self.instructions_languages.to_csv(os.path.join(self.path, f"{self.folder}{self._INSTRUCTIONS_LANGUAGES_SUFFIX}"), index=False)
     
     def close(self):
         if self.current_participant is not None:
             self.current_participant.close()
             
 class Participant:
-    def __init__(self, pseudo, session_path, session_experimental_parameters=None, recording_parameters=None, mode = 'Recording') -> None:
+    def __init__(self, pseudo, session_path, session_experimental_parameters=None, recording_parameters=None, mode = 'Recording', language='English') -> None:
         self.pseudo = pseudo
         self.experimental_parameters = session_experimental_parameters
         self.recording_parameters = recording_parameters
@@ -491,6 +551,9 @@ class Participant:
         self.missing_data = []
         self.available_trials = []
         self.missing_trials = []
+        self.expe_recorders = []
+        self.language = language
+        self.display_thread=None
         
         self.path = os.path.join(self.session_path, self.pseudo)
         self.combinations_path = os.path.join(self.path, f"{self.pseudo}_combinations.csv")
@@ -532,6 +595,7 @@ class Participant:
             os.rename(self.path, backup_path)
             print(f"Participant folder backuped to {backup_path}")
             
+    
     def generate_combinations(self):
         # get the parameters from the session and number of repetitions separately
         number_of_repetitions = int(self.experimental_parameters['Number of repetitions'][0])
@@ -578,11 +642,11 @@ class Participant:
                 movement_type = row['Movement Types']
                 trial_folder_name = f"trial_{trial_index}_combi_{objects}_{hand}_{grip}_{movement_type}"
                 self.combinations_data.loc[index, 'Trial Folder'] = trial_folder_name
+                self.combinations_data.loc[index, 'Trial Number'] = trial_index+1
             print(f"Combinations read from '{self.combinations_path}'")
         
     def build_recorders(self, devices_ids, resolution, fps):
         print('LESSGOOOOOOO')
-        self.expe_recorders = []
         for device_id in devices_ids:
             expe_recorder = erc.ExperimentRecorder(self.path, device_id = device_id, resolution = resolution, fps = fps)
             self.expe_recorders.append(expe_recorder)
@@ -590,17 +654,17 @@ class Participant:
     def initiate_experiment(self):
         self.trial_ongoing = False
         devices_ids = self.recording_parameters['devices_ids']
-        resolution = self.recording_parameters['resolution']
+        self.resolution = self.recording_parameters['resolution']
         fps = self.recording_parameters['fps'][0]
         self.build_UIs()
-        self.build_recorders(devices_ids, resolution, fps)   
+        self.build_recorders(devices_ids, self.resolution, fps)   
         self.save_experimental_parameters()
         self.save_recording_parameters()   
         
     def start_experiment(self):
         self.trial_ongoing = False
         self.start_button.state(['disabled'])
-        self.start_next_trial_button.state(['!disabled'])
+        self.display_next_trial_button.state(['!disabled'])
         self.stop_button.state(['!disabled'])
         self.current_trial_index=0
         for expe_recorder in self.expe_recorders:
@@ -616,32 +680,44 @@ class Participant:
         self.expe_running=False
         for rec in self.expe_recorders:
             rec.stop()
-        self.display_thread.join()
+        if self.display_thread is not None:
+            self.display_thread.join()
         print("Experiment stopped")        
+        self.participant_window.destroy()
+        self.experimentator_window.destroy()
 
+    def display_next_trial(self):
+        self.current_trial = self.missing_trials[self.current_trial_index]
+        self.txt_trial.set(f"Trial {self.current_trial_index+1}/{self.nb_trials}")
+        procede = self.current_trial.check_and_make_dir()
+        if procede:
+            # self.instructions_text.set(self.current_trial.get_instructions())
+            txt = self.current_trial.get_instructions_colored()
+            self.instructions_text_widget.delete('1.0', tk.END)
+            for text, tag in txt:
+                self.instructions_text_widget.insert(tk.END, text, tag)
+            self.display_next_trial_button.state(['disabled'])
+            self.start_next_trial_button.state(['!disabled'])
+        else:     
+            self.current_trial_index += 1
+            self.display_next_trial()
+    
     def start_next_trial(self):
+        self.trial_ongoing = True
         self.start_next_trial_button.state(['disabled'])
         self.stop_current_trial_button.state(['!disabled'])
-        self.trial_ongoing = True
-        self.current_trial = self.missing_trials[self.current_trial_index]
-        procede = self.current_trial.make_dir()
-        if procede:
-            self.instructions_text.set(self.current_trial.get_instructions())
-            for rec in self.expe_recorders:
-                rec.record_trial(self.current_trial)   
-        else:     
-            self.trial_ongoing = False
-            self.current_trial_index += 1
-        return procede
+        for rec in self.expe_recorders:
+            rec.record_trial(self.current_trial)  
 
     def stop_current_trial(self):
         self.trial_ongoing = False
         for rec in self.expe_recorders:
             rec.stop_record()
         self.current_trial_index += 1
-        self.start_next_trial_button.state(['!disabled'])
+        self.display_next_trial_button.state(['!disabled'])
         self.stop_current_trial_button.state(['disabled'])
         print(f"Stopped {self.current_trial.label}")
+        self.display_next_trial()
         
     def display_task(self):
         while self.expe_running:
@@ -652,12 +728,13 @@ class Participant:
                     #TODO : resize the image to fit the screen
                     named_img = cv2.putText(named_img, f'view {rec.device_id}', (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (88, 205, 54), 1, cv2.LINE_AA)
                     if self.trial_ongoing:
-                        named_img = cv2.putText(named_img, 'Recording', (50,100), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 10, 10), 1, cv2.LINE_AA)
+                        named_img = cv2.putText(named_img, 'Recording', (50,100), cv2.FONT_HERSHEY_SIMPLEX, 1, (10, 10, 255), 1, cv2.LINE_AA)
                     imgs.append(named_img)
             if len(imgs) > 0:
                 side_by_side_img = cv2.hconcat(imgs)
                 # cv2.imshow(self.current_trial.label,side_by_side_img)
-                cv2.imshow('jklmf',side_by_side_img)
+                side_by_side_img = cv2.resize(side_by_side_img, (self.resolution[0], int(self.resolution[1]/len(imgs))))
+                cv2.imshow(f'Recording participant {self.pseudo}',side_by_side_img)
             k = cv2.waitKey(1)
             if k == ord('q'):
                 break        
@@ -666,32 +743,63 @@ class Participant:
     def build_participant_UI(self):
         self.participant_window = tk.Toplevel()
         size=720
-        self.participant_window.geometry(f"{size}x{size}")
+        # self.participant_window.attributes('-fullscreen', True)
         self.participant_window.title(f'Instructions for participant {self.pseudo}')
         frame = ttk.Frame(self.participant_window)
         frame.pack(fill=tk.BOTH, expand=True)
-        self.instructions_text = tk.StringVar()
-        self.instructions_text.set("WELCOME TO THE I-GRIP EXPERIMENT")
+        # self.instructions_text = tk.StringVar()
+        # get the instruction corresponding to the label 'Welcome'
+        # self.instructions_text.set(self.instructions.loc[self.instructions['Label'] == 'Welcome', 'Instructions'].values[0])
+        #TODO : add language selection
         # self.instructions_text.set("Please read the instructions below and click on 'Start' when you are ready to start the experiment.")
-        self.instructions_label = ttk.Label(frame, textvariable=self.instructions_text, font=("Helvetica", 25), wraplength=size-20, justify='center')
-        #center the label vertically
-        self.instructions_label.pack(fill=tk.BOTH, expand=True)
+        # self.instructions_label = ttk.Label(self.participant_window, textvariable=self.instructions_text, font=("Helvetica", 25), wraplength=size-20, justify='center')
+        # #center the label vertically
+        # self.instructions_label.pack(fill=tk.BOTH, expand=True)
+        main_font = ["Helvetica", 30]
+        
+        self.instructions_text_widget = tk.Text(frame, font=("Helvetica", 25), wrap=tk.WORD)
+        self.instructions_text_widget.pack(fill=tk.BOTH, expand=True,anchor='center')
+        self.instructions_text_widget.tag_configure("center", justify='center',font=("Helvetica", 25, "bold"))
+        self.instructions_text_widget.tag_configure("left", justify='left')
+        self.instructions_text_widget.tag_configure("red", foreground="red")
+        self.instructions_text_widget.tag_configure("green", foreground="green")
+        self.instructions_text_widget.tag_configure("blue", foreground="blue")
+        self.instructions_text_widget.tag_configure("purple", foreground="pink")
+        self.instructions_text_widget.tag_configure("title", font=('Helvetica', 35), justify='center')
+        self.instructions_text_widget.tag_configure("normal", font=main_font)
+        self.instructions_text_widget.tag_configure("intro", font=main_font+["bold"], justify='center')
+        self.instructions_text_widget.tag_configure("hand", font=main_font+["bold"], foreground="#5bc0de")
+        self.instructions_text_widget.tag_configure("mov_type", font=main_font+["bold"], foreground="#5cb85c")
+        self.instructions_text_widget.tag_configure("grip", font=main_font+["bold"], foreground="#ffc107")
+        self.instructions_text_widget.tag_configure("object", font=main_font+["bold"], foreground="#d9534f")
+        self.instructions_text_widget.tag_configure("bold", font=("Helvetica", 25, "bold"))
+        self.instructions_text_widget.tag_configure("italic", font=("Helvetica", 25, "italic"))
+        self.instructions_text_widget.tag_configure("underline", font=("Helvetica", 25, "underline"))
+        self.instructions_text_widget.insert(tk.END, self.instructions.loc[self.instructions['Label'] == 'Welcome', 'Instructions'].values[0], "center")
     
     def build_experimentator_UI(self):
         self.experimentator_window = tk.Toplevel()
         self.experimentator_window.geometry("720x720")
         self.experimentator_window.title(f'Instructions for experimentator {self.pseudo}')
         frame = ttk.Frame(self.experimentator_window)
-        frame.pack(fill=tk.BOTH, expand=True)
-        
-        self.start_button = ttk.Button(frame, text="Start experiment", command=self.start_experiment)
+        frame.pack()
+        # frame.pack(fill=tk.BOTH, expand=True)
+        self.nb_trials = len(self.missing_trials)
+        self.txt_trial = tk.StringVar()
+        self.txt_trial.set(f"Trial -/{self.nb_trials}")
+        self.trial_label = ttk.Label(frame, textvariable=self.txt_trial, font=("Helvetica", 25), justify='center')
+        self.trial_label.pack(fill=tk.BOTH, expand=True)
+        self.start_button = ttk.Button(frame, text="Start experiment", command=self.start_experiment, style='primary.TButton')
         self.start_button.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.start_next_trial_button = ttk.Button(frame, text="Start next trial", command=self.start_next_trial)
+        self.display_next_trial_button = ttk.Button(frame, text="Display next trial", command=self.display_next_trial, style='secondary.TButton')
+        self.display_next_trial_button.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.start_next_trial_button = ttk.Button(frame, text="Start trial", command=self.start_next_trial, style = 'success.TButton')
         self.start_next_trial_button.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.stop_current_trial_button = ttk.Button(frame, text="Stop current trial", command=self.stop_current_trial)
+        self.stop_current_trial_button = ttk.Button(frame, text="Stop current trial", command=self.stop_current_trial, style = 'warning.TButton')
         self.stop_current_trial_button.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.stop_button = ttk.Button(frame, text="Stop experiment", command=self.stop_experiment)
-        self.stop_button.pack(fill=tk.BOTH, expand=True)
+        self.stop_button = ttk.Button(frame, text="Stop experiment", command=self.stop_experiment, style = 'danger.TButton')
+        self.stop_button.pack(fill=tk.BOTH, expand=True, pady=30)
+        self.display_next_trial_button.state(['disabled'])
         self.start_next_trial_button.state(['disabled'])
         self.stop_current_trial_button.state(['disabled'])
         self.stop_button.state(['disabled'])
@@ -710,10 +818,14 @@ class Participant:
         # convert this list to a dataframe with a column named "Trial Folder"
         # self.found_trial_folders = pd.DataFrame(self.found_trial_folders, columns=['Trial Folder'])      
         print(f"Trial folders read from '{self.path}': \n{self.found_trial_folders}")     
+        #TODO
         for trial_folder in self.combinations_data['Trial Folder']:
+        for row in self.combinations_data.iterrows():
             # check if the trial_folder is in the list of found_trial_folders
+            trial_folder = row[1]['Trial Folder']
             if not trial_folder in self.found_trial_folders:
                 self.missing_trial_folders.append(trial_folder)
+                self.available_trials.append(Trial(trial_folder, self.path, row[1]))
                 
         if len(self.missing_trial_folders) > 0:
             print(f"Participant '{self.pseudo}' missing {len(self.missing_trial_folders)} trial folders: ")
@@ -721,7 +833,6 @@ class Participant:
             self.all_data_available = False
             self.missing_data.append('trial folders')
 
-        self.available_trials = [Trial(trial_folder, self.path) for trial_folder in self.found_trial_folders] 
         self.missing_trials = [Trial(trial_folder, self.path) for trial_folder in self.missing_trial_folders]
     
     def pre_process(self, experiment_replayer):
@@ -781,6 +892,14 @@ class Participant:
         self.progress_display = progress_display
         progress_display.reset(len(self.available_trials), "trials pre-processed", f"Pre-processing participant {self.pseudo}")
         
+    def set_instructions(self, session_instructions):
+        #extract columns 'Label' and language from session_instructions
+        self.instructions = session_instructions[['Label', self.language]]
+        #change self.language column name to 'Instructions'
+        self.instructions.rename(columns={self.language: 'Instructions'}, inplace=True)
+        for trial in self.missing_trials:
+            trial.set_instructions(self.instructions)
+                
     def save_combinations(self):
         self.combinations_data.to_csv(self.combinations_path, index=False)
         print(f"Combinations written to '{self.combinations_path}'")
@@ -846,7 +965,11 @@ class Trial:
         self.grip_ind = 3
         self.movement_type_ind = 4
         self.combination_header = ["Trial Number", "Objects", "Hands", "Grips", "Movement Types"]
-        
+    
+    def set_instructions(self, instructions):
+        #transform the instructions dataframe into a dictionary
+        self.instructions = instructions.set_index('Label').to_dict()['Instructions']
+    
     def extract_data(self, experiment_replayer):
         device_id = experiment_replayer.get_device_id()
         print('device_id', device_id)
@@ -940,7 +1063,7 @@ class Trial:
             experiment_analyser.analyse(self.hands_data, self.objects_data)
             print("Data analysed")
     
-    def make_dir(self):
+    def check_and_make_dir(self):
         if os.path.exists(self.path):
             overwrite = messagebox.askyesno("Trial folder already exists", f"Trial folder {self.path} already exists. Do you want to overwrite it?")
             if overwrite:
@@ -949,29 +1072,52 @@ class Trial:
                 os.rename(self.path, backup_path)
                 print(f"Trial folder backuped to {backup_path}")
             else:
+                messagebox.showinfo("Trial skipped", f"Trial folder {self.path} skipped, going to next trial")
                 return False
         os.makedirs(self.path)
         self.combination.to_csv(os.path.join(self.path, f"{self.label}_combinations.csv"), index=False)
         return True
-    
-    # def record(self, recorders):
-    #     for rec in recorders:
-    #         rec.new_record(self.label)
-    
-    # def stop_record(self, recorders):
         
         
-    def get_instructions(self):
+    def get_instructions(self, language='English'):
+        #TODO : add language selection
         print(f'Combination: {self.combination}')
         mov_type = self.combination[self.combination_header[self.movement_type_ind]]
         obj = self.combination[self.combination_header[self.obj_ind]]
         hand = self.combination[self.combination_header[self.hand_ind]]
         grip = self.combination[self.combination_header[self.grip_ind]]
-        if mov_type == 'simulated':
-            text=f"Please reach for object {obj} using your {hand} hand. Aim as if you would apply {grip} grip, but don't move your fingers."
-        else:
-            text=f"Please reach for object {obj} using your {hand} hand. Use your fingers to apply {grip} grip"
-        print(f'Instructions: {text}')
+        intro = f"{self.instructions['intro']} \n \n"
+        t_obj = f"\t {self.instructions['object_intro']} {self.instructions[obj]} \n"
+        t_hand = f"\t {self.instructions['hand_intro']} {self.instructions[hand]} \n"
+        t_grip = f"\t {self.instructions['grip_intro']} {self.instructions[grip]} \n"
+        t_mov = f"\n {self.instructions[mov_type]}"
+        text = intro + t_obj + t_hand + t_grip + t_mov
+        return text
+        
+    def get_instructions_colored(self, language='English'):
+        #TODO : add language selection
+        print(f'Combination: {self.combination}')
+        mov_type = self.combination[self.combination_header[self.movement_type_ind]]
+        obj = self.combination[self.combination_header[self.obj_ind]]
+        hand = self.combination[self.combination_header[self.hand_ind]]
+        grip = self.combination[self.combination_header[self.grip_ind]]
+        intro = f" \n \n  \n \n  \n{self.instructions['intro']} \n \n \n"
+        t_obj = f"\t {self.instructions['object_intro']} "
+        t_hand = f"\t {self.instructions['hand_intro']} "
+        t_grip = f"\t {self.instructions['grip_intro']} "
+        t_obj_c = f"{self.instructions[obj]} \n \n"
+        t_hand_c = f"{self.instructions[hand]} \n \n"
+        t_grip_c = f"{self.instructions[grip]} \n \n"
+        t_mov_c = f"\t {self.instructions[mov_type]}"
+        text = [(intro, "intro"),
+                (t_obj, "normal"),
+                (t_obj_c, "object"),
+                (t_hand,"normal"),
+                (t_hand_c, "hand"),
+                (t_grip, "normal"),
+                (t_grip_c, "grip"),
+                (t_mov_c, "mov_type") ]
+                
         return text
         
 class ProgressDisplay(ttk.Labelframe):

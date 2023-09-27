@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 import argparse
-from i_grip import HandDetectors as hd
+from i_grip import HandDetectors2 as hd
 from i_grip import Object2DDetectors as o2d
 from i_grip import ObjectPoseEstimators as ope
-from i_grip import Scene as sc
+from i_grip import Scene2 as sc
 import cv2
 
 class ExperimentReplayer:

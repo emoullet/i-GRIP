@@ -217,6 +217,7 @@ class ExperimentRecordingInterface(ExperimentInterface):
     
     _LOCATION_OPTIONS = ["Paris", "Montpellier"]
     _HANDEDNESS_OPTIONS = ["Righthanded", "Lefthanded"]
+    _LANGUAGE_OPTIONS = ["French", "English"]
     _1080P = [1920, 1080]
     _720P = [1280, 720]
     _480P = [640, 480]
@@ -228,7 +229,8 @@ class ExperimentRecordingInterface(ExperimentInterface):
         print("Building recording interface")
         self.location = None
         self.handedness = None
-        self.resolution = None        
+        self.resolution = None       
+        self.language = None 
         self.is_one_device_selected = False
         self.devices_ids  = [device.getMxId() for device in depthai.Device.getAllAvailableDevices()]
         
@@ -320,6 +322,17 @@ class ExperimentRecordingInterface(ExperimentInterface):
             self.handedness_button_list[handedness] = handedness_button
             handedness_button.grid(row=0, column=col+1, padx=10)
 
+        ### LANGUAGE INFO
+        language_frame = ttk.Frame(participant_infos_frame)       
+        language_frame.pack(pady=10)  # Add spacing below the pseudonymize button 
+         
+        language_label = ttk.Label(language_frame, text="Language : ")
+        language_label.grid(row=1, column=0, sticky="EW", padx=10)  # Center the label
+        self.language_var = tk.StringVar()
+        for col, language in enumerate(self._LANGUAGE_OPTIONS):
+            language_check = ttk.Radiobutton(language_frame, text=f'{language}', value=self._LANGUAGE_OPTIONS[col], variable=self.language_var, command=self.select_language)
+            language_check.grid(row=1, column=col+1, sticky="EW", padx=10)
+        
         ### PARTICIPANT INFO
         participant_frame = ttk.Frame(participant_infos_frame)
         participant_frame.pack(padx=20, pady=20)  # Add padding around the frame
@@ -345,7 +358,7 @@ class ExperimentRecordingInterface(ExperimentInterface):
         self.pseudonymize_button.grid(row=1, column=3, padx=10)
         # self.pseudonymize_button.pack(pady=10)  # Add spacing below the button
         self.pseudonymize_button.config(state="disabled")
-
+        
         self.initiate_experiment_button = ttk.Button(self.root, text="INITIATE EXPERIMENT", command=self.iniate_experiment)
         self.initiate_experiment_button.pack(fill=tk.X, padx=20, pady=10)
         # self.pseudonymize_button.pack(pady=10)  # Add spacing below the button
@@ -353,16 +366,21 @@ class ExperimentRecordingInterface(ExperimentInterface):
         
     def select_location(self):
         self.location = self.location_var.get()
-        if self.handedness is not None:
-            self.pseudonymize_button.config(state="normal")
-            self.initiate_experiment_button.config(state="normal")
+        if self.handedness is not None and self.language is not None:
+            self.go_participant_validation()
         print(f"Selected location: {self.location}")
         
     def select_handedness(self):
         self.handedness = self.handedness_var.get()
-        if self.location is not None:
+        if self.location is not None and self.language is not None:
             self.go_participant_validation()
         print(f"Selected handedness: {self.handedness}")
+        
+    def select_language(self):
+        self.language= self.language_var.get()
+        if self.location is not None and self.handedness is not None:
+            self.go_participant_validation()
+        print(f"Selected language: {self.language}")
     
     def go_participant_validation(self):
         self.pseudonymize_button.config(state="normal")
@@ -456,7 +474,7 @@ class ExperimentRecordingInterface(ExperimentInterface):
     def get_pseudo(self):
         if not self.check_name_entries():
             return
-        pseudo = self.experiment.selected_session.get_participant(self.participant_first_name, self.participant_name, self.handedness, self.location)
+        pseudo = self.experiment.selected_session.get_participant(self.participant_first_name, self.participant_name, self.handedness, self.location, language=self.language)
         if pseudo is not None:
             self.participant_pseudo = pseudo
             self.entry_participant_pseudo.config(state="normal")
@@ -709,7 +727,7 @@ def kill_gpu_processes():
 if __name__ == "__main__":
     kill_gpu_processes()
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', choices=['record', 'replay', 'analysis'], default = 'replay', help="Mode of the interface")
+    parser.add_argument('-m', '--mode', choices=['record', 'replay', 'analysis'], default = 'record', help="Mode of the interface")
     args = vars(parser.parse_args())
     if args['mode'] == 'record':
         interface = ExperimentRecordingInterface()

@@ -2,7 +2,7 @@
 
 import argparse
 import threading
-from i_grip import HandDetectors as hd
+from i_grip import HandDetectors2 as hd
 import cv2
 import numpy as np
 import time
@@ -38,6 +38,8 @@ class ExperimentRecorder:
         self.hand_detector.start()
         self.capture_thread = threading.Thread(target=self.capture_task)
         self.record_thread = None
+        self.current_path = None
+        self.current_recording = None
         self.capture_thread.start()
         self.saving_threads=[]
         print(f'Recorder with {self.device_id} started.')
@@ -75,6 +77,9 @@ class ExperimentRecorder:
         #recorder = cv2.VideoWriter(self.path_vid, self.fourcc, 30.0,(1280,720))
         #for im in self.img_series:
         #    recorder.write(im)
+        if self.current_path is None:
+            print("No recording to save")
+            return
         print(f"Start saving {self.current_path}")
         path= self.path_gzip
         path_timestamps = self.path_timestamps
@@ -108,6 +113,7 @@ class ExperimentRecorder:
 
     def record_trial(self, trial):
         name = trial.label
+        print(f"Starting recording {self.device_id} with config {name}")
         self.current_recording = name
         self.time_series=[]
         self.depth_map_series=[]
@@ -116,14 +122,16 @@ class ExperimentRecorder:
         self.path_gzip = os.path.join(self.current_path,f'{name}_cam_{self.cam_label}_depth_map.gzip')
         self.path_timestamps = os.path.join(self.current_path,f'{name}_cam_{self.cam_label}_timestamps.csv')
         self.new_rec = True
-        print(f"Starting recording {self.device_id} with config {name}")
     
     def stop_record(self):
         self.end_rec = True
+        if self.current_recording is None:
+            print("No recording to stop")
+            return
+        print(f"Stoping recording {self.device_id} with config {self.current_recording}")
         save_thread = threading.Thread(target=self.save_data_task)
         save_thread.start()
         self.saving_threads.append(save_thread)
-        print(f"Stoping recording {self.device_id} with config {self.current_recording}")
     
     def stop(self):
         print(f"Stoping {self.device_id}")

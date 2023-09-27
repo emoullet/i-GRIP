@@ -2,7 +2,7 @@
 
 import argparse
 import threading
-from i_grip import HandDetectors as hd
+from i_grip import HandDetectors2 as hd
 from i_grip import Object2DDetectors as o2d
 from i_grip import ObjectPoseEstimators as ope
 from i_grip import Scene as sc
@@ -21,7 +21,7 @@ def report_gpu():
 
 class GraspingDetector:
     def __init__(self, ) -> None:
-        dataset = "tless"
+        dataset = "ycbv"
         self.hand_detector = hd.HybridOAKMediapipeDetector(detect_hands=False)
         cam_data = self.hand_detector.get_device_data()
         self.object_detector = o2d.get_object_detector(dataset,
@@ -158,6 +158,6 @@ if __name__ == '__main__':
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     
     report_gpu()
-    kill_gpu_processes()
+    # kill_gpu_processes()
     i_grip = GraspingDetector()
     i_grip.run()
