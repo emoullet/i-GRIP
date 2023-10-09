@@ -552,7 +552,8 @@ class Participant:
         self.available_trials = []
         self.missing_trials = []
         self.expe_recorders = []
-        self.language = language
+        self.language = language        
+        self.trial_ongoing = False
         self.display_thread=None
         
         self.path = os.path.join(self.session_path, self.pseudo)
@@ -560,6 +561,9 @@ class Participant:
         self.data_csv_path = os.path.join(self.path, f"{self.pseudo}_data.csv")
         
         self.is_new = not os.path.exists(self.path)
+        self.participant_window = None
+        self.experimentator_window = None
+        self.progress_window = None
         
         if self.is_new:     
             if mode != 'Recording':
@@ -618,7 +622,7 @@ class Participant:
         for index, row in self.combinations_data.iterrows():
             trial_folder_name = f"trial_{index}_combi_{row['Objects']}_{row['Hands']}_{row['Grips']}_{row['Movement Types']}"
             self.combinations_data.loc[index, 'Trial Folder'] = trial_folder_name
-            self.combinations_data.loc[index, 'Trial Number'] = index+1
+            self.combinations_data.loc[index, 'Trial Number'] = int(index+1)
             self.missing_trials.append(Trial(trial_folder_name, self.path, row))
         self.save_combinations()
         print(f"{len(self.combinations_data)} combinations generated and saved to '{self.combinations_path}'")
@@ -634,15 +638,17 @@ class Participant:
         else:
             #create a pandas dataframe from the csv and read header from file            
             self.combinations_data = pd.read_csv(self.combinations_path)
-            for index, row in self.combinations_data.iterrows():
-                trial_index = row['Trial Number']
-                objects = row['Objects']
-                hand = row['Hands']
-                grip = row['Grips']
-                movement_type = row['Movement Types']
-                trial_folder_name = f"trial_{trial_index}_combi_{objects}_{hand}_{grip}_{movement_type}"
-                self.combinations_data.loc[index, 'Trial Folder'] = trial_folder_name
-                self.combinations_data.loc[index, 'Trial Number'] = trial_index+1
+            self.combinations_data = self.combinations_data.astype({'Trial Number': int})
+            # for index, row in self.combinations_data.iterrows():
+            #     trial_index = row['Trial Number']
+            #     objects = row['Objects']
+            #     hand = row['Hands']
+            #     grip = row['Grips']
+            #     movement_type = row['Movement Types']
+            #     trial_folder_name = f"trial_{trial_index}_combi_{objects}_{hand}_{grip}_{movement_type}"
+            #     self.combinations_data.loc[index, 'Trial Folder'] = trial_folder_name
+            #     self.combinations_data.loc[index, 'Trial Number'] = int(trial_index+1)
+            print(f"combinations data: \n{self.combinations_data}")
             print(f"Combinations read from '{self.combinations_path}'")
         
     def build_recorders(self, devices_ids, resolution, fps):
@@ -652,7 +658,6 @@ class Participant:
             self.expe_recorders.append(expe_recorder)
     
     def initiate_experiment(self):
-        self.trial_ongoing = False
         devices_ids = self.recording_parameters['devices_ids']
         self.resolution = self.recording_parameters['resolution']
         fps = self.recording_parameters['fps'][0]
@@ -682,13 +687,16 @@ class Participant:
             rec.stop()
         if self.display_thread is not None:
             self.display_thread.join()
-        print("Experiment stopped")        
-        self.participant_window.destroy()
-        self.experimentator_window.destroy()
+        print("Experiment stopped")     
+        if self.participant_window is not None:
+            self.participant_window.destroy()
+        if self.experimentator_window is not None:
+            self.experimentator_window.destroy()   
 
     def display_next_trial(self):
         self.current_trial = self.missing_trials[self.current_trial_index]
-        self.txt_trial.set(f"Trial {self.current_trial_index+1}/{self.nb_trials}")
+        self.trials_advancement.set(f"Trial {self.current_trial_index+1}/{self.nb_trials}")
+        self.current_trial_combination.set(self.current_trial.get_combination())
         procede = self.current_trial.check_and_make_dir()
         if procede:
             # self.instructions_text.set(self.current_trial.get_instructions())
@@ -706,6 +714,7 @@ class Participant:
         self.trial_ongoing = True
         self.start_next_trial_button.state(['disabled'])
         self.stop_current_trial_button.state(['!disabled'])
+        self.instructions_text_widget.insert(tk.END, " \n \n \n \nRecording", "recording")
         for rec in self.expe_recorders:
             rec.record_trial(self.current_trial)  
 
@@ -713,18 +722,25 @@ class Participant:
         self.trial_ongoing = False
         for rec in self.expe_recorders:
             rec.stop_record()
-        self.current_trial_index += 1
-        self.display_next_trial_button.state(['!disabled'])
+        if self.current_trial_index >= len(self.missing_trials)-1:
+            self.instructions_text_widget.delete('1.0', tk.END)
+            self.instructions_text_widget.insert(tk.END, "\n \n \n \n \n \n CONGRATULATIONS, YOU HAVE COMPLETED THE EXPERIMENT !", "center")
+        else:
+            self.current_trial_index += 1
+            self.display_next_trial_button.state(['!disabled'])
+            self.display_next_trial()
         self.stop_current_trial_button.state(['disabled'])
         print(f"Stopped {self.current_trial.label}")
-        self.display_next_trial()
         
     def display_task(self):
+        rotate = True
         while self.expe_running:
             imgs=[]
             for rec in self.expe_recorders:
                 if rec.img is not None:
                     named_img = rec.img.copy()
+                    if rotate:
+                        named_img = cv2.rotate(named_img, cv2.ROTATE_90_CLOCKWISE)
                     #TODO : resize the image to fit the screen
                     named_img = cv2.putText(named_img, f'view {rec.device_id}', (50,50), cv2.FONT_HERSHEY_SIMPLEX, 1, (88, 205, 54), 1, cv2.LINE_AA)
                     if self.trial_ongoing:
@@ -733,7 +749,8 @@ class Participant:
             if len(imgs) > 0:
                 side_by_side_img = cv2.hconcat(imgs)
                 # cv2.imshow(self.current_trial.label,side_by_side_img)
-                side_by_side_img = cv2.resize(side_by_side_img, (self.resolution[0], int(self.resolution[1]/len(imgs))))
+                if not rotate:
+                    side_by_side_img = cv2.resize(side_by_side_img, (self.resolution[0], int(self.resolution[1]/len(imgs))))
                 cv2.imshow(f'Recording participant {self.pseudo}',side_by_side_img)
             k = cv2.waitKey(1)
             if k == ord('q'):
@@ -760,6 +777,7 @@ class Participant:
         self.instructions_text_widget = tk.Text(frame, font=("Helvetica", 25), wrap=tk.WORD)
         self.instructions_text_widget.pack(fill=tk.BOTH, expand=True,anchor='center')
         self.instructions_text_widget.tag_configure("center", justify='center',font=("Helvetica", 25, "bold"))
+        self.instructions_text_widget.tag_configure("recording", justify='center',font=("Helvetica", 25, "bold"), foreground="red")
         self.instructions_text_widget.tag_configure("left", justify='left')
         self.instructions_text_widget.tag_configure("red", foreground="red")
         self.instructions_text_widget.tag_configure("green", foreground="green")
@@ -785,10 +803,14 @@ class Participant:
         frame.pack()
         # frame.pack(fill=tk.BOTH, expand=True)
         self.nb_trials = len(self.missing_trials)
-        self.txt_trial = tk.StringVar()
-        self.txt_trial.set(f"Trial -/{self.nb_trials}")
-        self.trial_label = ttk.Label(frame, textvariable=self.txt_trial, font=("Helvetica", 25), justify='center')
+        self.trials_advancement = tk.StringVar()
+        self.trials_advancement.set(f"Trial -/{self.nb_trials}")
+        self.trial_label = ttk.Label(frame, textvariable=self.trials_advancement, font=("Helvetica", 25), justify='center')
         self.trial_label.pack(fill=tk.BOTH, expand=True)
+        self.current_trial_combination = tk.StringVar()
+        self.current_trial_combination.set(f"Combination -")
+        self.trial_combination_label = ttk.Label(frame, textvariable=self.current_trial_combination, font=("Helvetica", 25), justify='center')
+        self.trial_combination_label.pack(fill=tk.BOTH, expand=True, pady=30)
         self.start_button = ttk.Button(frame, text="Start experiment", command=self.start_experiment, style='primary.TButton')
         self.start_button.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         self.display_next_trial_button = ttk.Button(frame, text="Display next trial", command=self.display_next_trial, style='secondary.TButton')
@@ -815,17 +837,22 @@ class Participant:
             return
         # list all folders from the participant folder, directories only
         self.found_trial_folders = [f for f in os.listdir(self.path) if os.path.isdir(os.path.join(self.path, f))]
+        print(f"Trial folders found in '{self.path}': \n{self.found_trial_folders}")
         # convert this list to a dataframe with a column named "Trial Folder"
         # self.found_trial_folders = pd.DataFrame(self.found_trial_folders, columns=['Trial Folder'])      
         print(f"Trial folders read from '{self.path}': \n{self.found_trial_folders}")     
         #TODO
-        for trial_folder in self.combinations_data['Trial Folder']:
-        for row in self.combinations_data.iterrows():
+        # for trial_folder in self.combinations_data['Trial Folder']:
+        for index, row in self.combinations_data.iterrows():
             # check if the trial_folder is in the list of found_trial_folders
-            trial_folder = row[1]['Trial Folder']
+            trial_folder = row['Trial Folder']
             if not trial_folder in self.found_trial_folders:
                 self.missing_trial_folders.append(trial_folder)
-                self.available_trials.append(Trial(trial_folder, self.path, row[1]))
+                self.missing_trials.append(Trial(trial_folder, self.path, row))
+                print(f"Trial folder '{trial_folder}' not found")
+            else:
+                self.available_trials.append(Trial(trial_folder, self.path, row))
+                print(f"Trial folder '{trial_folder}' found")
                 
         if len(self.missing_trial_folders) > 0:
             print(f"Participant '{self.pseudo}' missing {len(self.missing_trial_folders)} trial folders: ")
@@ -833,7 +860,7 @@ class Participant:
             self.all_data_available = False
             self.missing_data.append('trial folders')
 
-        self.missing_trials = [Trial(trial_folder, self.path) for trial_folder in self.missing_trial_folders]
+        # self.missing_trials = [Trial(trial_folder, self.path) for trial_folder in self.missing_trial_folders]
     
     def pre_process(self, experiment_replayer):
         print( f"Pre-processing pseudo '{self.pseudo}'")
@@ -969,6 +996,9 @@ class Trial:
     def set_instructions(self, instructions):
         #transform the instructions dataframe into a dictionary
         self.instructions = instructions.set_index('Label').to_dict()['Instructions']
+        
+    def get_combination(self):
+        return self.combination
     
     def extract_data(self, experiment_replayer):
         device_id = experiment_replayer.get_device_id()
@@ -1079,9 +1109,8 @@ class Trial:
         return True
         
         
-    def get_instructions(self, language='English'):
-        #TODO : add language selection
-        print(f'Combination: {self.combination}')
+    def get_instructions(self):
+        print(f'Combination: \n {self.combination}')
         mov_type = self.combination[self.combination_header[self.movement_type_ind]]
         obj = self.combination[self.combination_header[self.obj_ind]]
         hand = self.combination[self.combination_header[self.hand_ind]]
@@ -1094,7 +1123,7 @@ class Trial:
         text = intro + t_obj + t_hand + t_grip + t_mov
         return text
         
-    def get_instructions_colored(self, language='English'):
+    def get_instructions_colored(self):
         #TODO : add language selection
         print(f'Combination: {self.combination}')
         mov_type = self.combination[self.combination_header[self.movement_type_ind]]
@@ -1108,17 +1137,19 @@ class Trial:
         t_obj_c = f"{self.instructions[obj]} \n \n"
         t_hand_c = f"{self.instructions[hand]} \n \n"
         t_grip_c = f"{self.instructions[grip]} \n \n"
-        t_mov_c = f"\t {self.instructions[mov_type]}"
+        t_mov_c = f"\t {self.instructions[mov_type]} \n \n"
         text = [(intro, "intro"),
-                (t_obj, "normal"),
-                (t_obj_c, "object"),
+                (t_mov_c, "mov_type"),
                 (t_hand,"normal"),
                 (t_hand_c, "hand"),
                 (t_grip, "normal"),
                 (t_grip_c, "grip"),
-                (t_mov_c, "mov_type") ]
+                (t_obj, "normal"),
+                (t_obj_c, "object")]
                 
         return text
+    def get_instructions_colored2(self):
+        pass
         
 class ProgressDisplay(ttk.Labelframe):
     def __init__(self, nb_items, items_label, parent = None, title='') -> None:
