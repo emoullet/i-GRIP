@@ -9,7 +9,9 @@ from tkinter import messagebox, ttk
 from i_grip import databases_utils as db
 from i_grip import Scene as sc
 import ExperimentRecorder as erc
-import ExperimentReplayer as erp
+import ExperimentPreProcessor as epp
+import ExperimentReplayer2 as erp
+# import ExperimentAnalyzer as ea
 import threading
 import cv2
 import pandas as pd
@@ -34,7 +36,7 @@ def get_row_and_column_index_from_index(index, nb_items_total):
 class Experiment:
     #TODO : move option verbose in session class
     SESSION_OPTIONS = ["Session 1: Offline recordings", "Session 2: Online, static objects", "Session 3: Online, moving objects"]
-    MODES = ["Recording", "Replay", "Analysis"]
+    MODES = ["Recording", "Pre-processing", "Replay", "Analysis"]
     def __init__(self, name = None, win = None, mode=None) -> None:
         if mode not in self.MODES:
             raise ValueError(f"Mode {mode} not supported. Supported modes are {self.MODES}")
@@ -84,13 +86,19 @@ class Experiment:
         return self.selected_session
     
     def select_participant(self, pseudo):
-        self.selected_session.select_participant(pseudo)
+        return self.selected_session.select_participant(pseudo)
     
-    def pre_process_selected_participants(self):   
-        self.selected_session.pre_process_selected_participants()
-        
-    def get_participants(self):
-        return self.selected_session.get_participants()
+    def process_selected_participants(self, process_labels):   
+        if process_labels['Name'] == 'Replay':
+            self.selected_session.replay_selected_participants()
+        elif process_labels['Name'] == 'Pre-processing':
+            self.selected_session.pre_process_selected_participants()
+        elif process_labels['Name'] == 'Analysis':
+            self.selected_session.analyse_selected_participants()
+        else:
+            print(f"Process {process_labels['Name']} not supported")
+            # def get_participants(self):
+    #     return self.selected_session.get_participants()
     
     def get_session_label(self):
         return self.selected_session.label
@@ -117,6 +125,9 @@ class Experiment:
     def get_session_participants(self):
         return self.selected_session.get_participants() 
     
+    def get_session_processing_monitoring(self):
+        return self.selected_session.get_processing_monitoring()
+    
     def get_pseudo(self, participant_firstname, participant_surname, location):
         return self.selected_session.get_pseudo(participant_firstname, participant_surname, location)
     
@@ -134,8 +145,10 @@ class Session:
     _EXPERIMENTAL_PARAMETERS_SUFFIX = "_experimental_parameters.csv"
     _RECORDING_PARAMETERS_SUFFIX = "_recording_parameters.csv"
     _INSTRUCTIONS_LANGUAGES_SUFFIX = "_instructions_languages.csv"
+    _PROCESSING_MONITORING_SUFFIX = "_processing_monitoring.csv"
     
-    _PARTICIPANTS_DATABASE_HEADER = ["Pseudo", "Date", "Handedness", "Location", "To Pre-process", "Pre-processable", "Pre-processed", "All data available", "Folder available", "Combinations available", "All trial folders available", "Number of trials"]
+    _PARTICIPANTS_DATABASE_HEADER = ["Pseudo", "Date", "Handedness", "Location", "Number of trials"]
+    _PROCESSING_MONITORING_HEADER = ["Pseudo", "Recording date", "Pre-processing date", "Replay date", "Analysis date", "Status", "Number of trials", "Number of trials pre-processed", "Number of trials replayed", "Number of trials analysed"]
     _PARTICIPANTS_PSEUDOS_DATABASE_HEADER = ["FirstName", "Surname", "Pseudo"]
     _SUPPORTED_LANGUAGES = ["French", "English"]
     _INSTRUCTIONS_LANGUAGES_HEADER = ["Label"] + _SUPPORTED_LANGUAGES
@@ -144,13 +157,44 @@ class Session:
         self.index = index
         self.label = f"Session {self.index}"
         self.folder = f"Session_{self.index}"
+        
         self.path = os.path.join(experiment_path, self.folder)  
+        self.processing_path = os.path.join(experiment_path, f"{self.folder}_processing")
+        self.pre_processing_path = os.path.join(self.processing_path, "Pre_processing")
+        self.replay_path = os.path.join(self.processing_path, "Replay")
+        self.analysis_path = os.path.join(self.processing_path, "Analysis")
+        
         self.mode = mode
+        
+        if mode in ['Pre-processing', 'Replay', 'Analysis']:
+            if not os.path.exists(self.processing_path):
+                answer = messagebox.askyesno(f"Processing folder not found", f"Processing folder not found at {self.processing_path}, please check the session folder. Do you want to create a new one?")
+                if answer :
+                    os.makedirs(self.processing_path)
+                    print(f"New processing folder created")        
+        if self.mode == 'Pre-processing':
+            if not os.path.exists(self.processing_path):
+                answer = messagebox.askyesno(f"Processing folder not found", f"Processing folder not found at {self.processing_path}, please check the session folder. Do you want to create a new one?")
+                if answer :
+                    os.makedirs(self.processing_path)
+                    print(f"New pre-processing folder created")
+        if self.mode == 'Replay':
+            if not os.path.exists(self.replay_path):
+                answer = messagebox.askyesno(f"Replay folder not found", f"Replay folder not found at {self.replay_path}, please check the session folder. Do you want to create a new one?")
+                if answer :
+                    os.makedirs(self.replay_path)
+                    print(f"New replay folder created")
+        if self.mode == 'Analysis':
+            if not os.path.exists(self.analysis_path):
+                answer = messagebox.askyesno(f"Analysis folder not found", f"Analysis folder not found at {self.analysis_path}, please check the session folder. Do you want to create a new one?")
+                if answer :
+                    os.makedirs(self.analysis_path)
+                    print(f"New analysis folder created")
         
         self.all_participants = []
         self.current_participant = None
-        self.participants_to_pre_process = []   
-        self.continue_pre_processing = True     
+        self.participants_to_process = []   
+        self.continue_processing = True     
         
         self.all_data_available = True
         self.missing_data = []
@@ -168,10 +212,15 @@ class Session:
             os.makedirs(self.path)
             self.participants_database = pd.DataFrame(columns=self._PARTICIPANTS_DATABASE_HEADER)
             self.participants_pseudos_database = pd.DataFrame(columns=self._PARTICIPANTS_PSEUDOS_DATABASE_HEADER)
+            self.processing_monitoring_database = pd.DataFrame(columns=self._PROCESSING_MONITORING_HEADER)
         
         else:                
             print(f"Reading session {self.label} folder at {self.path}")
             self.import_participants_database()
+            
+            if self.participants_database is not None and self.mode != 'Recording':
+                self.import_processing_monitoring()
+                self.scan_participants_basic_data()
             self.import_pseudos_participants_database()
             self.import_instructions_languages()
             self.read_experimental_parameters()
@@ -181,9 +230,13 @@ class Session:
             self.extract_devices_data()
             if not self.all_data_available:
                 print(f"Session {self.label} incomplete. Missing data: {self.missing_data}")
+                
+        self.experiment_pre_processor = None
+        self.experiment_replayer = None
+        self.experiment_analyser = None
     
     def build_progress_display(self):
-        name = "Pre_processing..."
+        name = "Processing..."
         self.progress_window = tk.Toplevel()
         self.progress_window.geometry("750x450")
         self.progress_window.title(name)
@@ -192,17 +245,17 @@ class Session:
         label = ttk.Label(self.progress_window, text="Please wait until the end of the process.")
         label.pack()
         
-        messagebox.showinfo("Pre-processing", "Pre-processing started, please wait until the end of the process.")
+        messagebox.showinfo("Processing", "Processing started, please wait until the end of the process.")
         self.devices_progress_display = ProgressDisplay(len(self.devices_data), "devices", parent=self.progress_window, title="Devices") 
         self.devices_progress_display.pack(padx=10, pady=10)
-        self.participants_progress_display= ProgressDisplay(len(self.participants_to_pre_process), "participants pre-processed", parent=self.devices_progress_display, title = "Participants")
+        self.participants_progress_display= ProgressDisplay(len(self.participants_to_process), "participants pre-processed", parent=self.devices_progress_display, title = "Participants")
         self.participants_progress_display.pack(padx=10, pady=10)
-        self.trials_progress_display= ProgressDisplay(self.participants_to_pre_process[0].get_number_of_trials(), "trials pre-processed", parent=self.participants_progress_display, title = "Trials")
+        self.trials_progress_display= ProgressDisplay(self.participants_to_process[0].get_number_of_trials(), "trials pre-processed", parent=self.participants_progress_display, title = "Trials")
         self.trials_progress_display.pack(padx=10, pady=10)
-        self.current_trial_progress_display= ProgressDisplay(self.participants_to_pre_process[0].get_number_of_trials(), "trials pre-processed", parent=self.trials_progress_display, title = "Current Trial")
+        self.current_trial_progress_display= ProgressDisplay(self.participants_to_process[0].get_number_of_trials(), "trials pre-processed", parent=self.trials_progress_display, title = "Current Trial")
         self.current_trial_progress_display.pack(padx=10, pady=10)
         
-        interrupt_button = ttk.Button(self.progress_window, text="Interrupt", command=self.interrupt_pre_processing)
+        interrupt_button = ttk.Button(self.progress_window, text="Interrupt", command=self.interrupt_processing)
         interrupt_button.pack(padx=10, pady=10)
         
         self.progress_window.update()
@@ -326,21 +379,9 @@ class Session:
         else:
             self.participants_database = pd.read_csv(participants_csv_path)
             print(f"Pseudos database imported from '{participants_csv_path}'")
-            #add a column "To Pre-process" to the database, with each row filled with True
-            self.participants_database["To Pre-process"] = self.preselect_all_participants
-        
-        if self.participants_database is not None and self.mode != 'Recording':
-            for index, row in self.participants_database.iterrows():
-                participant = Participant(row['Pseudo'], self.path, self.experimental_parameters, mode=self.mode)
-                self.all_participants.append(participant)
-                # check if the participant is pre-processed
-                self.participants_database.loc[index, 'Pre-processable'] = participant.is_folder_available() and participant.is_combinations_available() and participant.get_number_of_trials() > 0
-                self.participants_database.loc[index, 'Pre-processed'] = participant.is_pre_processed()
-                self.participants_database.loc[index, 'All data available'] = participant.is_all_data_available()
-                self.participants_database.loc[index, 'Folder available'] = participant.is_folder_available()
-                self.participants_database.loc[index, 'Combinations available'] = participant.is_combinations_available()
-                self.participants_database.loc[index, 'All trial folders available'] = participant.is_all_trial_folders_available()
-                self.participants_database.loc[index, 'Number of trials'] = participant.get_number_of_trials()
+            #add a column "To Process" to the database, with each row filled with True
+            self.participants_database["To Process"] = self.preselect_all_participants
+            
             
     def import_instructions_languages(self):
         self.instructions_languages_csv_path = os.path.join(self.path, f"{self.folder}{self._INSTRUCTIONS_LANGUAGES_SUFFIX}")
@@ -359,6 +400,44 @@ class Session:
         else:
             self.instructions_languages = pd.read_csv(self.instructions_languages_csv_path)
             print(f"Instructions languages database imported from '{self.instructions_languages_csv_path}'")
+            
+    def scan_participants_basic_data(self):
+        for index, row in self.participants_database.iterrows():
+            participant = Participant(row['Pseudo'], self.path, self.experimental_parameters, mode=self.mode)
+            self.all_participants.append(participant)
+            # check if the participant is pre-processed
+            # self.participants_database.loc[index, 'Processed'] = participant.is_processed()
+            self.participants_database.loc[index, 'All data available'] = participant.is_all_data_available()
+            # self.participants_database.loc[index, 'Folder available'] = participant.is_folder_available()
+            # self.participants_database.loc[index, 'Combinations available'] = participant.is_combinations_available()
+            # self.participants_database.loc[index, 'All trial folders available'] = participant.is_all_trial_folders_available()
+            self.processing_monitoring_database.loc[index, 'Pseudo'] = row['Pseudo']
+            self.processing_monitoring_database.loc[index, 'Recording date'] = row['Date']
+            self.processing_monitoring_database.loc[index, 'Status'] = participant.get_status()
+            self.processing_monitoring_database.loc[index, 'Number of trials'] = participant.get_number_of_trials()
+            self.processing_monitoring_database.loc[index, 'Number of trials pre-processed'] = participant.get_number_of_pre_processed_trials()
+            self.processing_monitoring_database.loc[index, 'Number of trials replayed'] = participant.get_number_of_replayed_trials()
+            self.processing_monitoring_database.loc[index, 'Number of trials analysed'] = participant.get_number_of_analyzed_trials()
+            self.processing_monitoring_database.loc[index, 'Processable'] = participant.is_folder_available() and participant.is_combinations_available() and participant.get_number_of_trials() > 0
+            self.processing_monitoring_database.loc[index, 'To Process'] = False
+        self.save_processing_monitoring()
+            
+    def import_processing_monitoring(self):
+        monitoring_csv_path = os.path.join(self.processing_path, f"{self.folder}{self._PROCESSING_MONITORING_SUFFIX}")
+        if not os.path.exists(monitoring_csv_path):
+            print(f"No processing monitoring database found in {self.path}")
+            answer = messagebox.askyesno(f"Processing monitoring database not found", "Processing monitoring database not found, please check the session folder. Do you want to create a new one?")
+            if answer :
+                self.processing_monitoring_database = pd.DataFrame(columns=self._PROCESSING_MONITORING_HEADER)
+                self.processing_monitoring_database.to_csv(monitoring_csv_path, index=False)
+                print(f"New processing monitoring database created")
+        else:
+            self.processing_monitoring_database = pd.read_csv(monitoring_csv_path)
+            print(f"Processing monitoring database imported from '{monitoring_csv_path}'")
+        
+        self.processing_monitoring_database[ 'Processable'] = False
+        self.processing_monitoring_database[ 'To Process'] = False
+        print('Processing monitoring database: \n', self.processing_monitoring_database)
             
     def extract_devices_data(self):
         print("Extracting devices data...")
@@ -386,60 +465,111 @@ class Session:
     def get_participants(self):
         return self.participants_database
     
+    def get_processing_monitoring(self):
+        return self.processing_monitoring_database
+    
     def select_participant(self, pseudo):
-        # change the value at the line of pseudo and the column "To Pre-process" to true
-        bool = self.participants_database.loc[self.participants_database['Pseudo'] == pseudo, 'To Pre-process'].values[0]
-        self.participants_database.loc[self.participants_database['Pseudo'] == pseudo, 'To Pre-process'] = not bool
+        # change the value at the line of pseudo and the column "To Process" to true
+        bool = self.processing_monitoring_database.loc[self.processing_monitoring_database['Pseudo'] == pseudo, 'To Process'].values[0]
+        self.processing_monitoring_database.loc[self.processing_monitoring_database['Pseudo'] == pseudo, 'To Process'] = not bool
         if not bool:
             print(f"Pseudo '{pseudo}' selected for pre-processing")
         else:
             print(f"Pseudo '{pseudo}' deselected for pre-processing")
-        print(f"Participants database: \n{self.participants_database}")
+        print(f"Processing database: \n{self.processing_monitoring_database}")
+        nb_selected_participants = len(self.processing_monitoring_database.loc[self.processing_monitoring_database['To Process']==True])
+        return nb_selected_participants
     
     def start(self):
         self.save_databases()
         self.current_participant.initiate_experiment()
-    
-    def pre_process_selected_participants(self):    
-        self.continue_pre_processing = True                
-        for index, row in self.participants_database.iterrows():
-            if row['To Pre-process']:
-                self.participants_to_pre_process.append(self.all_participants[index])
+        
+    def fetch_participants_to_process(self):
+        
+        self.continue_processing = True                
+        for index, row in self.processing_monitoring_database.iterrows():
+            if row['To Process']:
+                self.participants_to_process.append(self.all_participants[index])
                 
+    def replay_selected_participants(self):    
+        self.fetch_participants_to_process()
         self.build_progress_display()
         
         for device_id, device_data in self.devices_data.items():
             print(f"Building experiment replayer for device {device_id} with device_data: resolution {device_data['resolution']}, matrix {device_data['matrix']}")
             self.current_device_id = device_id
             self.experiment_replayer = erp.ExperimentReplayer(device_id, device_data)
-            self.devices_progress_display.set_current(f"Pre-processing device {device_id}")
+            self.devices_progress_display.set_current(f"Processing device {device_id}")
             self.progress_window.update_idletasks()
             print("updating progress window")
             self.progress_window.update()
             print(f"Experiment replayer for device {device_id} built")
             # Loop over selected participants 
-            for participant in self.participants_to_pre_process:
-                self.participants_progress_display.set_current(f"Pre-processing participant {participant.pseudo}")
+            for participant in self.participants_to_process:
+                self.participants_progress_display.set_current(f"Processing participant {participant.pseudo}")
                 self.progress_window.update()
                 participant.set_progress_display( self.progress_window, self.trials_progress_display)
-                participant.pre_process(self.experiment_replayer)
-                self.participants_progress_display.increment()                
+                participant.replay(self.experiment_replayer)
+                self.participants_progress_display.increment()          
+                # set replayed to True in the database date in processing monitoring databased at the line corresponding to the participant's pseudo
+                self.processing_monitoring_database.loc[self.processing_monitoring_database['Pseudo'] == participant.pseudo, 'Replay date'] = pd.Timestamp.now()
+                      
                 self.progress_window.update()
-                if self.continue_pre_processing == False:
+                if self.continue_processing == False:
                     break
             self.participants_progress_display.reset()
             self.devices_progress_display.increment()
             self.progress_window.update()
             self.experiment_replayer.stop()
-            if self.continue_pre_processing == False:
+            if self.continue_processing == False:
                 break
             print(f"Experiment replayer for device {device_id} stopped")
         print("All selected participants pre-processed")
         # self.progress_window.destroy()
+    
+    def pre_process_selected_participants(self):
+        self.fetch_participants_to_process()
+        self.save_processing_monitoring()
+        self.continue_processing = True
+        print('Building experiment pre-processor...')
+        self.experiment_pre_processor = epp.ExperimentPreProcessor()
+        print('Experiment pre-processor built')
+        print('Pre-processing selected participants...')
+        for participant in self.participants_to_process:
+            participant.pre_process(self.experiment_pre_processor)
+            self.processing_monitoring_database.loc[self.processing_monitoring_database['Pseudo'] == participant.pseudo, 'Pre-processing date'] = pd.Timestamp.now()
+            self.save_processing_monitoring()
+            if self.continue_processing == False:
+                break
         
-    def interrupt_pre_processing(self):
+        self.experiment_pre_processor.stop()
+        
+    def analyse_selected_participants(self):
+        self.fetch_participants_to_process()
+        self.build_progress_display()
+        self.continue_processing = True
+        print('Building experiment analyser...')
+        experiment_analyser = ea.ExperimentAnalyser(self.experimental_parameters)
+        print('Experiment analyser built')
+        print('Analysing selected participants...')
+        for participant in self.participants_to_process:
+            self.participants_progress_display.set_current(f"Processing participant {participant.pseudo}")
+            self.progress_window.update()
+            participant.set_progress_display( self.progress_window, self.trials_progress_display)
+            participant.analyse(experiment_analyser)
+            self.participants_progress_display.increment()
+            self.processing_monitoring_database.loc[self.processing_monitoring_database['Pseudo'] == participant.pseudo, 'Analysis date'] = pd.Timestamp.now()
+            self.progress_window.update()
+            if self.continue_processing == False:
+                break
+        
+        self.participants_progress_display.reset()
+        self.progress_window.update()
+        experiment_analyser.stop()
+        
+    def interrupt_processing(self):
         print("Interrupting pre-processing...")
-        self.continue_pre_processing = False
+        self.continue_processing = False
         
     def is_data_available(self):
         return self.all_data_available
@@ -478,14 +608,19 @@ class Session:
         return pseudo
     
     def save_databases(self):
-        #remove the column "To Pre-process" from the database  
-        to_save = self.participants_database.drop(columns=['To Pre-process'])
+        #remove the column "To Process" from the database  
+        to_save = self.participants_database.drop(columns=['To Process'])
         to_save.to_csv(os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_DATABASE_FILE_SUFFIX}"), index=False)
         print(f'Participants database saved to {os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_DATABASE_FILE_SUFFIX}")}')
         print(f'Participants database: \n{self.participants_database}')
         self.participants_pseudos_database.to_csv(os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_PSEUDOS_DATABASE_FILE_SUFFIX}"), index=False)
         print(f'Participants pseudos database saved to {os.path.join(self.path, f"{self.folder}{self._PARTICIPANTS_PSEUDOS_DATABASE_FILE_SUFFIX}")}')
         print(f'Participants pseudos database: \n{self.participants_pseudos_database}')
+    
+    def save_processing_monitoring(self):
+        self.processing_monitoring_database.to_csv(os.path.join(self.processing_path, f"{self.folder}{self._PROCESSING_MONITORING_SUFFIX}"), index=False)
+        print(f'Processing monitoring database saved to {os.path.join(self.processing_path, f"{self.folder}{self._PROCESSING_MONITORING_SUFFIX}")}')
+        print(f'Processing monitoring database: \n{self.processing_monitoring_database}')
         
     def save_experimental_parameters(self):
         csv_path = os.path.join(self.path, f'{self.folder}{self._EXPERIMENTAL_PARAMETERS_SUFFIX}')
@@ -531,6 +666,11 @@ class Session:
         self.instructions_languages.to_csv(os.path.join(self.path, f"{self.folder}{self._INSTRUCTIONS_LANGUAGES_SUFFIX}"), index=False)
     
     def close(self):
+        if self.experiment_replayer is not None:
+            self.experiment_replayer.stop()
+        if self.experiment_pre_processor is not None:
+            self.experiment_pre_processor.stop()
+        
         if self.current_participant is not None:
             self.current_participant.close()
             
@@ -546,7 +686,7 @@ class Participant:
         self.found_trial_folders = None
         self.current_trial_index = 0
         self.all_data_available = True
-        self.pre_processed = False
+        self.processed = False
         self.missing_trial_folders = []
         self.missing_data = []
         self.available_trials = []
@@ -557,6 +697,39 @@ class Participant:
         self.display_thread=None
         
         self.path = os.path.join(self.session_path, self.pseudo)
+        self.pre_processing_path = os.path.join(f'{self.session_path}_processing/Pre_processing', self.pseudo)
+        self.replay_path = os.path.join(f'{self.session_path}_processing/Replay', self.pseudo)
+        self.analyze_path = os.path.join(f'{self.session_path}_processing/Analysis', self.pseudo)
+        
+        if self.mode == 'Pre-processing':
+            self.source_path = self.path
+            self.destination_path = self.pre_processing_path
+        elif self.mode == 'Replay':
+            self.source_path = self.pre_processing_path
+            self.destination_path = self.replay_path
+        elif self.mode == 'Analysis':
+            self.source_path = self.replay_path
+            self.destination_path = self.analyze_path
+        
+        if self.mode == 'Pre-processing':
+            if not os.path.exists(self.pre_processing_path):
+                answer = messagebox.askyesno(f"Participant pre_processing folder not found", f"Participant processing folder not found in {self.pre_processing_path}. Do you want to create a new one?")
+                if answer:
+                    os.makedirs(self.pre_processing_path)
+                    print(f"New participant pre_processing folder created in {self.pre_processing_path}")
+        if self.mode == 'Replay':
+            if not os.path.exists(self.replay_path):
+                answer = messagebox.askyesno(f"Participant replay folder not found", f"Participant replay folder not found in {self.replay_path}. Do you want to create a new one?")
+                if answer:
+                    os.makedirs(self.replay_path)
+                    print(f"New participant replay folder created in {self.replay_path}")   
+        if self.mode == 'Analysis':
+            if not os.path.exists(self.analyze_path):
+                answer = messagebox.askyesno(f"Participant analysis folder not found", f"Participant analysis folder not found in {self.analyze_path}. Do you want to create a new one?")
+                if answer:
+                    os.makedirs(self.analyze_path)
+                    print(f"New participant analysis folder created in {self.analyze_path}")         
+        
         self.combinations_path = os.path.join(self.path, f"{self.pseudo}_combinations.csv")
         self.data_csv_path = os.path.join(self.path, f"{self.pseudo}_data.csv")
         
@@ -577,9 +750,10 @@ class Participant:
         
         if not self.is_new:
             self.get_combinations()
-            self.scan_trial_folders()           
+            self.fetch_trial_folders()       
+            self.scan_found_trials()    
             if mode != 'Recording':
-                self.check_pre_processed()   
+                self.check_processed()   
             else:
                 if self.combinations_data is not None and len(self.available_trials)>0:
                     answer = messagebox.askyesnocancel(f"Participant folder already exists", f"Participant folder already exists in {self.path}. A combinations file and {len(self.available_trials)} trial folders were found. Please check the participant folder. Press 'yes' to resume the recording and complete missing trials. Press 'no' to delete existing data, generate a new combinations file and start a new recording. Else, press 'cancel' and select another participant.")
@@ -623,7 +797,7 @@ class Participant:
             trial_folder_name = f"trial_{index}_combi_{row['Objects']}_{row['Hands']}_{row['Grips']}_{row['Movement Types']}"
             self.combinations_data.loc[index, 'Trial Folder'] = trial_folder_name
             self.combinations_data.loc[index, 'Trial Number'] = int(index+1)
-            self.missing_trials.append(Trial(trial_folder_name, self.path, row))
+            self.missing_trials.append(Trial(trial_folder_name, self.path, row, participant_pre_processing_path=self.pre_processing_path, participant_replay_path=self.replay_path, participant_analysis_path=self.analyze_path))
         self.save_combinations()
         print(f"{len(self.combinations_data)} combinations generated and saved to '{self.combinations_path}'")
             
@@ -695,7 +869,7 @@ class Participant:
 
     def display_next_trial(self):
         self.current_trial = self.missing_trials[self.current_trial_index]
-        self.trials_advancement.set(f"Trial {self.current_trial_index+1}/{self.nb_trials}")
+        self.trials_advancement.set(f"Trial {self.current_trial_index+1}/{self.nb_missing_trials}")
         self.current_trial_combination.set(self.current_trial.get_combination())
         procede = self.current_trial.check_and_make_dir()
         if procede:
@@ -802,9 +976,9 @@ class Participant:
         frame = ttk.Frame(self.experimentator_window)
         frame.pack()
         # frame.pack(fill=tk.BOTH, expand=True)
-        self.nb_trials = len(self.missing_trials)
+        self.nb_missing_trials = len(self.missing_trials)
         self.trials_advancement = tk.StringVar()
-        self.trials_advancement.set(f"Trial -/{self.nb_trials}")
+        self.trials_advancement.set(f"Trial -/{self.nb_missing_trials}")
         self.trial_label = ttk.Label(frame, textvariable=self.trials_advancement, font=("Helvetica", 25), justify='center')
         self.trial_label.pack(fill=tk.BOTH, expand=True)
         self.current_trial_combination = tk.StringVar()
@@ -830,7 +1004,7 @@ class Participant:
         self.build_experimentator_UI()
         self.build_participant_UI()
     
-    def scan_trial_folders(self):
+    def fetch_trial_folders(self):
         if self.combinations_data is None:            
             self.all_data_available = False
             self.missing_data.append('trial folders')
@@ -840,20 +1014,26 @@ class Participant:
         print(f"Trial folders found in '{self.path}': \n{self.found_trial_folders}")
         # convert this list to a dataframe with a column named "Trial Folder"
         # self.found_trial_folders = pd.DataFrame(self.found_trial_folders, columns=['Trial Folder'])      
-        print(f"Trial folders read from '{self.path}': \n{self.found_trial_folders}")     
+        # print(f"Trial folders read from '{self.path}': \n{self.found_trial_folders}")     
         #TODO
         # for trial_folder in self.combinations_data['Trial Folder']:
         for index, row in self.combinations_data.iterrows():
             # check if the trial_folder is in the list of found_trial_folders
             trial_folder = row['Trial Folder']
+            # print(f"Checking trial folder '{trial_folder}'")
+            # print(trial_folder)
+            # print(self.found_trial_folders[0])
+            # print(trial_folder == self.found_trial_folders[0])
+            # print(trial_folder in self.found_trial_folders)
             if not trial_folder in self.found_trial_folders:
                 self.missing_trial_folders.append(trial_folder)
-                self.missing_trials.append(Trial(trial_folder, self.path, row))
-                print(f"Trial folder '{trial_folder}' not found")
+                self.missing_trials.append(Trial(trial_folder, self.path, row, participant_pre_processing_path=self.pre_processing_path, participant_replay_path=self.replay_path, participant_analysis_path=self.analyze_path))
+                # print(f"Trial folder '{trial_folder}' not found")
             else:
-                self.available_trials.append(Trial(trial_folder, self.path, row))
-                print(f"Trial folder '{trial_folder}' found")
-                
+                self.available_trials.append(Trial(trial_folder, self.path, row, participant_pre_processing_path=self.pre_processing_path, participant_replay_path=self.replay_path, participant_analysis_path=self.analyze_path))
+                # print(f"Trial folder '{trial_folder}' found")
+            # if index == 1:
+            #     klvm
         if len(self.missing_trial_folders) > 0:
             print(f"Participant '{self.pseudo}' missing {len(self.missing_trial_folders)} trial folders: ")
             # print(f"Participant '{self.pseudo}' missing trial folders: {self.missing_trial_folders}")
@@ -861,9 +1041,79 @@ class Participant:
             self.missing_data.append('trial folders')
 
         # self.missing_trials = [Trial(trial_folder, self.path) for trial_folder in self.missing_trial_folders]
+        
+    def scan_found_trials(self):
+        self.nb_pre_processed_trials = 0
+        self.nb_replayed_trials = 0
+        self.nb_analyzed_trials = 0
+        self.status = 'Not processed'
+        for trial in self.available_trials:
+            if trial.was_pre_processed():
+                self.nb_pre_processed_trials += 1
+            if trial.was_replayed():
+                self.nb_replayed_trials += 1
+            if trial.was_analyzed():
+                self.nb_analyzed_trials += 1
+                
+        if self.is_folder_available() and self.is_combinations_available() and self.get_number_of_trials() > 0 :
+            self.status = 'Ready to pre-process'
+        
+        if self.nb_pre_processed_trials == len(self.available_trials):
+            self.status = 'Pre-processed'
+        elif self.nb_pre_processed_trials > 0:
+            self.status = 'Partially pre-processed'
+        if self.nb_replayed_trials == len(self.available_trials):
+            self.status = 'Replayed'
+        elif self.nb_replayed_trials > 0:
+            self.status = 'Partially replayed'
+        if self.nb_analyzed_trials == len(self.available_trials):
+            self.status = 'Analyzed'
+        elif self.nb_analyzed_trials > 0:
+            self.status = 'Partially analyzed'
+                
+    def get_number_of_pre_processed_trials(self):
+        return self.nb_pre_processed_trials
     
-    def pre_process(self, experiment_replayer):
+    def get_number_of_replayed_trials(self):
+        return self.nb_replayed_trials
+    
+    def get_number_of_analyzed_trials(self):
+        return self.nb_analyzed_trials
+    
+    def get_status(self):
+        return self.status
+    
+    def pre_process(self, experiment_pre_processor):
+        experiment_pre_processor.set_new_participant(self.pseudo, len(self.available_trials))
         print( f"Pre-processing pseudo '{self.pseudo}'")
+        check_path = os.path.join(self.pre_processing_path, f"{self.pseudo}_trials_check.csv")
+        if os.path.exists(check_path):
+            trials_check = pd.read_csv(check_path)
+        else:
+            trials_check = self.combinations_data
+        trials_check['Combination OK'] = False
+        trials_check['Face OK'] = False
+        trials_check['Trial_duration'] = 0
+        for i, trial in enumerate(self.available_trials):
+            if trial.was_pre_processed():
+                answer = messagebox.askyesnocancel(f"Trial already pre-processed", f"Trial {trial.label} already pre-processed. Do you want to re-process it?")
+                if answer != True:
+                    experiment_pre_processor.skip_trial()
+                    continue
+            print(f"Pre-processing trial {i}/{len(self.available_trials)}")
+            combi_ok, face_ok, durations = trial.pre_process(experiment_pre_processor)
+            trials_check.loc[trials_check['Trial Folder'] == trial.label, 'Combination OK'] = combi_ok
+            trials_check.loc[trials_check['Trial Folder'] == trial.label, 'Face OK'] = face_ok
+            trials_check.loc[trials_check['Trial Folder'] == trial.label, 'Stand_duration'] = durations['stand']
+            trials_check.loc[trials_check['Trial Folder'] == trial.label, 'Movement_duration'] = durations['movement']
+            trials_check.loc[trials_check['Trial Folder'] == trial.label, 'Contact_duration'] = durations['contact']
+            trials_check.loc[trials_check['Trial Folder'] == trial.label, 'Return_duration'] = durations['return']
+            trials_check.to_csv(check_path, index=False)
+            print(f'saved to {check_path}')
+                
+    def replay(self, experiment_replayer):
+        
+        print( f"Replaying pseudo '{self.pseudo}'")
         # create a dict to store 'Trial_duration' and 'Trial_data_extration_duration' for each trial
         trials_meta_data = ['Found', 'Trial_duration', 'Trial_data_extration_duration']
         # create an empty dataframe to store the trials_meta_data, same row index as self.combinations
@@ -873,9 +1123,9 @@ class Participant:
         self.data = pd.concat([self.combinations_data, trials_meta_data_df], axis=1)
         #loop over trials
         for trial in self.available_trials:          
-            self.progress_display.set_current(f"Pre-processing trial {trial.label}")  
+            self.progress_display.set_current(f"Replaying trial {trial.label}")  
             self.progress_window.update()
-            trial_meta_data = trial.extract_data(experiment_replayer)
+            trial_meta_data = trial.replay(experiment_replayer)
             self.progress_display.increment()
             self.progress_window.update()
             # put True in the 'Found' column of the self.data dataframe
@@ -887,20 +1137,30 @@ class Participant:
         #write the participant data to a csv file
         self.data.to_csv(self.data_csv_path, index=False)
         
-        print(f"Pre-processed pseudo '{self.pseudo}'")
+        print(f"Processed pseudo '{self.pseudo}'")
         print(f"Participant '{self.pseudo}' missing trial {len(self.missing_trial_folders)} folders ")
+    
+    def analyze(self, experiment_analyzer):
+        print( f"Analyzing pseudo '{self.pseudo}'")
+        for trial in self.available_trials:
+            print(f"Analyzing trial {trial.label}")
+            self.progress_display.set_current(f"Analyzing trial {trial.label}")  
+            self.progress_window.update()
+            trial.analyze(experiment_analyzer)
+            self.progress_display.increment()
+            self.progress_window.update()
     
     def get_number_of_trials(self):
         return len(self.available_trials)
     
-    def check_pre_processed(self):
+    def check_processed(self):
         if os.path.exists(self.data_csv_path):
-            self.pre_processed = True
+            self.processed = True
         else:
-            self.pre_processed = False
+            self.processed = False
             
-    def is_pre_processed(self):
-        return self.pre_processed
+    def is_processed(self):
+        return self.processed
     
     def is_all_data_available(self):
         return self.all_data_available
@@ -917,7 +1177,7 @@ class Participant:
     def set_progress_display(self, progress_window, progress_display):
         self.progress_window = progress_window
         self.progress_display = progress_display
-        progress_display.reset(len(self.available_trials), "trials pre-processed", f"Pre-processing participant {self.pseudo}")
+        progress_display.reset(len(self.available_trials), "trials pre-processed", f"Processing participant {self.pseudo}")
         
     def set_instructions(self, session_instructions):
         #extract columns 'Label' and language from session_instructions
@@ -976,13 +1236,16 @@ class Participant:
         self.stop_experiment()
         
 class Trial:
-    def __init__(self, label, participant_path, combination:pd.DataFrame=None) -> None:
+    def __init__(self, label, participant_path, combination:pd.DataFrame=None, participant_pre_processing_path = None, participant_replay_path = None, participant_analysis_path=None) -> None:
         self.label = label
         self.combination = combination
         self.participant_path = participant_path
         self.hand_data = None
         self.object_data = None
         self.path = os.path.join(self.participant_path, self.label)
+        self.pre_processing_path = os.path.join(participant_pre_processing_path, self.label)
+        self.replay_path = os.path.join(participant_replay_path, self.label)
+        self.analysis_path = os.path.join(participant_analysis_path, self.label)
         self.duration = None
         self.meta_data = None
         
@@ -1000,21 +1263,81 @@ class Trial:
     def get_combination(self):
         return self.combination
     
-    def extract_data(self, experiment_replayer):
+    def was_pre_processed(self):
+        if not os.path.exists(self.pre_processing_path):
+            pre_processed = False
+            return pre_processed
+        pre_processed = True
+        file_suffixes =  ['depth_map_movement.gzip', 
+                          'timestamps_movement.gzip', 
+                          'video_movement.avi',
+                          'depth_map_contact.gzip', 
+                          'timestamps_contact.gzip',
+                          'video_contact.avi',
+                          'depth_map_return.gzip',
+                          'timestamps_return.gzip',
+                          'video_return.avi',
+                          'depth_map_stand.gzip',
+                          'timestamps_stand.gzip',
+                          'video_stand.avi']
+
+        for suffix in file_suffixes:
+            #count number of files with suffix in the trial folder
+            file_count = len([f for f in os.listdir(self.pre_processing_path) if f.endswith(suffix)])
+            if file_count <2:
+                pre_processed = False
+                print(f"Trial '{self.label}' not pre-processed: missing file with suffix '{suffix}'")
+                break
+        if pre_processed:
+            print('Trial {} pre-processed'.format(self.label))
+        else:
+            print('Trial {} not pre-processed'.format(self.label))
+        
+        return pre_processed
+    
+    def was_replayed(self):
+        print('was {} replayed ?'.format(self.label))
+        if not os.path.exists(self.replay_path):
+            replayed = False
+            return replayed
+        replayed = True
+        files_suffixes = ['depth_map.gzip', 
+                          'timestamps.gzip', 
+                          'video.avi']
+        for suffix in files_suffixes:
+            file_count = len([f for f in os.listdir(self.replay_path) if f.endswith(suffix)])
+            if file_count <2:
+                replayed = False
+                print(f"Trial '{self.label}' not replayed: missing file with suffix '{suffix}'")
+                break
+        return replayed
+    
+    def was_analyzed(self):
+        return False
+    
+    def pre_process(self, experiment_pre_processor):
+        if not os.path.exists(self.pre_processing_path):
+            os.mkdir(self.pre_processing_path)
+        self.combi_ok, self.face_ok, duration = experiment_pre_processor.process_trial(self.path, self.combination, self.pre_processing_path)
+        return self.combi_ok, self.face_ok, duration
+    
+    def replay(self, experiment_replayer, sequence = 'movement'):
+        if not os.path.exists(self.replay_path):
+            os.mkdir(self.replay_path)
         device_id = experiment_replayer.get_device_id()
         print('device_id', device_id)
-        print('folder', self.path)
+        print('folder', self.pre_processing_path)
         #get the .gzip file with device_id in the name
-        depth_file_list = [f for f in os.listdir(self.path) if device_id in f and f.endswith(".gzip")]
+        depth_file_list = [f for f in os.listdir(self.pre_processing_path) if device_id in f and f.endswith(".gzip") and 'depth_map' in f and sequence in f]
         print('depth_file_list', depth_file_list)
         depth_file = depth_file_list[0]
         #extract data from the first file into a dataframe
-        timestamps_and_depth = pd.read_pickle(os.path.join(self.path, depth_file), compression='gzip')
+        timestamps_and_depth = pd.read_pickle(os.path.join(self.pre_processing_path, depth_file), compression='gzip')
         #get the video file with device_id in the name
-        video = [f for f in os.listdir(self.path) if device_id in f and f.endswith(".avi")][0]
+        video = [f for f in os.listdir(self.pre_processing_path) if device_id in f and f.endswith(".avi") and sequence in f][0]
         #merge the two dataframes into a single dataframe
         replay = timestamps_and_depth.to_dict(orient='list')
-        replay['Video'] = os.path.join(self.path, video)
+        replay['Video'] = os.path.join(self.pre_processing_path, video)
         
         #get the current pandas timestamp
         now = pd.Timestamp.now()
@@ -1030,7 +1353,7 @@ class Trial:
         self.duration = last_timestamp - first_timestamp
         self.meta_data = {'Trial_duration': [self.duration], 'Trial_data_extration_duration': [replay_duration]}
         
-        timestamps_only = pd.read_pickle(os.path.join(self.path, f"{self.label}_cam_{device_id}_timestamps.csv"), compression='gzip')
+        timestamps_only = pd.read_pickle(os.path.join(self.pre_processing_path, f"{self.label}_cam_{device_id}_timestamps_{sequence}.gzip"), compression='gzip')
         self.main_data = timestamps_only
         
         hand_keys = sc.GraspingHand.MAIN_DATA_KEYS
@@ -1051,18 +1374,21 @@ class Trial:
             # add the object_summary to the main_data starting at the row corresponding to the first timestamp
             self.main_data = pd.merge(self.main_data, object_summary, on='Timestamps', how='left')
         
-        self.save_data(device_id)
+        self.save_replay_data(device_id)
         return self.meta_data
 
-    def save_data(self, device_id):
+    def analyse(self, experiment_analyser):
+        experiment_analyser.analyse(self.hands_data, self.objects_data)
+
+    def save_replay_data(self, device_id):
         #write hands_data and objects_data to csv files
         for hand_id, hand_data in self.hands_data.items():
-            hand_data.to_csv(os.path.join(self.path, f"{self.label}_cam_{device_id}_{hand_id}.csv"))
+            hand_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_{hand_id}.csv"))
         for object_id, object_data in self.objects_data.items():
-            object_data.to_csv(os.path.join(self.path, f"{self.label}_cam_{device_id}_{object_id}.csv"))
-        self.main_data.to_csv(os.path.join(self.path, f"{self.label}_cam_{device_id}_main.csv"))
+            object_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_{object_id}.csv"))
+        self.main_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_main.csv"))
     
-    def read_data(self, device_id):
+    def read_replay_data(self, device_id):
         # list all files from the trial folder, files only, that end with hand_traj.csv
         hand_files = [f for f in os.listdir(self.path) if os.path.isfile(os.path.join(self.path, f)) and device_id in f and f.endswith(f"hand_traj.csv")]
         for hand_file in hand_files:
@@ -1084,7 +1410,7 @@ class Trial:
     def analyse_data(self, experiment_analyser):
         
         device_id = experiment_analyser.get_device_id()
-        self.read_data(device_id)
+        self.read_replay_data(device_id)
         if self.hands_data is None or self.objects_data is None:
             print("No data to analyse")
             return

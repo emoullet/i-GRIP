@@ -275,7 +275,6 @@ class GraspingHandState:
             self.update_normalized_landmarks(new_input)
         else:
             print(f'weird input : {new_input}')
-        print(f'updated with {type(new_input)} : {new_input}')
         self.was_updated = True
         
     def propagate(self, timestamp):
@@ -312,7 +311,8 @@ class GraspingHandState:
         
     def propagate_normalized_landmarks(self, elapsed):
         if not  self.was_updated:
-            next_normalized_landmarks = self.normalized_landmarks + elapsed*self.normalized_landmarks_velocity
+            # next_normalized_landmarks = self.normalized_landmarks + elapsed*self.normalized_landmarks_velocity
+            next_normalized_landmarks = self.normalized_landmarks
             self.normalized_landmarks_velocity = self.normalized_landmarks_velocity
         else:
             next_normalized_landmarks = self.new_normalized_landmarks

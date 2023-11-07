@@ -491,10 +491,17 @@ class ExperimentRecordingInterface(ExperimentInterface):
         
 
 class ExperimentProcessingInterface(ExperimentInterface):
-    def __init__(self):
-        super().__init__(mode = "Replay")
+    def __init__(self, mode = 'Processing'):
+        super().__init__(mode = mode)
         self.pseudo_button_default_state = ['!alternate']
         print("Building replay interface")
+        self.ready_to_process_labels = ['Ready to process']
+        self.to_process_label = 'To process'
+        self.partially_processed_label = 'Partially processed'
+        self.already_processed_label = 'Already processed'
+        self.trial_label_processed = ''
+        self.process_labels = {'Processabe': self.ready_to_process_labels,
+                               'Already processed': self.already_processed_label}
     
     def build_participants_layout(self):
         if self.participants_frame is not None:
@@ -506,28 +513,28 @@ class ExperimentProcessingInterface(ExperimentInterface):
         
         self.select_alls_grid = ttk.Frame(self.participants_frame)
         self.select_alls_grid.pack(pady=10)
+        
         self.select_all_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all participants", command=self.select_all_participants)
         self.select_all_participants_checkbutton.grid(row=0, column=0)
         self.select_all_participants_checkbutton.state(self.pseudo_button_default_state)
-            
+        
+        self.select_non_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all not processed participants", command=self.select_not_processed_participants)
+        self.select_non_processed_participants_checkbutton.grid(row=0, column=1)
+        self.select_non_processed_participants_checkbutton.state(self.pseudo_button_default_state)
+        
+        self.select_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all processed participants", command=self.select_processed_participants)
+        self.select_processed_participants_checkbutton.grid(row=0, column=2)
+        self.select_processed_participants_checkbutton.state(self.pseudo_button_default_state)
+        
         #add a ttk.frame to self.root for the pseudos database
         self.participants_list_frame = ttk.Frame(self.participants_frame)
         # add the frame to the root
         self.participants_list_frame.pack(pady=10)
         
-        self.select_non_pre_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all not processed participants", command=self.select_not_pre_processed_participants)
-        self.select_non_pre_processed_participants_checkbutton.grid(row=0, column=1)
-        self.select_non_pre_processed_participants_checkbutton.state(self.pseudo_button_default_state)
-        
-        self.select_pre_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all processed participants", command=self.select_pre_processed_participants)
-        self.select_pre_processed_participants_checkbutton.grid(row=0, column=2)
-        self.select_pre_processed_participants_checkbutton.state(self.pseudo_button_default_state)
-        
-        
         # add a ttk.button to launch the processing of the selected participants
-        self.pre_process_participants_button = ttk.Button(self.participants_frame, text="Pre-process participants", command=self.pre_process_selected_participants)
-        self.pre_process_participants_button.pack(pady=10)
-        self.pre_process_participants_button.config(state="disabled")
+        self.process_participants_button = ttk.Button(self.participants_frame, text="Process participants", command=self.process_selected_participants)
+        self.process_participants_button.pack(pady=10)
+        self.process_participants_button.config(state="disabled")
         
     def build_experimental_parameters_layout(self):
         last_row = super().build_experimental_parameters_layout_from_list()
@@ -552,57 +559,58 @@ class ExperimentProcessingInterface(ExperimentInterface):
             
     def load_participants(self):       
         self.participants = self.experiment.get_session_participants()
+        self.processing = self.experiment.get_session_processing_monitoring()
+        #add a column 'Processable' to the participants dataframe filled with True
         
         print(self.participants)
+        print(self.processing)
         # get the number of rows in the database
         nb_pseudos = len(self.participants.index)-1
+        style = ttk.Style()
+        # center the text for all checkbuttons styles
+        style.configure("primary.Outline.Toolbutton", justify="center")
+        style.configure("success.Outline.Toolbutton", justify="center")
+        style.configure("warning.Outline.Toolbutton", justify="center")
+        style.configure("danger.Outline.Toolbutton", justify="center")
         
         #add a ttk.checkbutton to this frame for each pseudo in the database, ignoring the header, distribute them vertically and horizontally
-        for index, row in self.participants.iterrows():
+        for index, row in self.processing.iterrows():
             pseudo = row['Pseudo']
             #get the date of the experiment as pandas timestamp
-            date = pd.Timestamp(row['Date'])
+            date = pd.Timestamp(row['Recording date'])
             # format date to remove the seconds, and keep only the day, month and year
             date = date.strftime("%d/%m/%Y")
-            nb_trials=row['Number of trials']
+            #TODO : replace number of trials by number of trials for current processing
+            nb_trials=row[f'Number of trials{self.trial_label_processed}']
             button_text = f"{pseudo} \n({date} - {int(nb_trials)} trials)"
             pseudo_checkbutton = ttk.Checkbutton(self.participants_list_frame, text=button_text, command=lambda pseudo=pseudo: self.select_participant(pseudo))
             # create style variation for the checkbutton with smaller font size
-            style = ttk.Style()
-            # center the text for all checkbuttons styles
-            style.configure("primary.Outline.Toolbutton", justify="center")
-            style.configure("success.Outline.Toolbutton", justify="center")
-            style.configure("warning.Outline.Toolbutton", justify="center")
-            style.configure("danger.Outline.Toolbutton", justify="center")
             
             row_index, column_index = ex.get_row_and_column_index_from_index(index, nb_pseudos)
-            pseudo_checkbutton.grid(row=row_index, column=column_index)
+            pseudo_checkbutton.grid(row=row_index, column=column_index, sticky="EW")
         
             #add the checkbutton to the list of checkbuttons
             self.all_participants_checkbuttons[pseudo] = pseudo_checkbutton
-            # disable the checkbutton if the participant has not all data available
-            if row['All data available']:
-                #change the color of the checkbutton if the participant has already been pre-processed
-                if row['Pre-processed']:
-                    # change the style of the checkbutton
-                    pseudo_checkbutton.config(style="success.Outline.Toolbutton")
-                    self.pre_processed_participants_buttons.append(pseudo_checkbutton)
-                else:
-                    pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
-                    self.not_pre_processed_participants_buttons.append(pseudo_checkbutton)
-                
+            
+            
+            pseudo_checkbutton.state(['!selected'])
+            if row['Status'] == self.already_processed_label:
+                pseudo_checkbutton.config(style="success.Outline.Toolbutton")
+                self.pre_processed_participants_buttons.append(pseudo_checkbutton)
                 pseudo_checkbutton.state(self.pseudo_button_default_state)
-                pseudo_checkbutton.state(['!selected'])
-            elif row['Folder available'] and row['Combinations available']:
-                if row['Pre-processed']:
-                    pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
-                else:
-                    pseudo_checkbutton.config(style="warning.Outline.Toolbutton")
-                    
-                
+                self.processing.loc[index, 'Processable'] = True
+            elif row['Status'] in self.ready_to_process_labels:
+                pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
+                self.not_pre_processed_participants_buttons.append(pseudo_checkbutton)
+                self.processing.loc[index, 'Processable'] = True
+            elif row['Status'] == self.partially_processed_label:
+                pseudo_checkbutton.config(style="warning.Outline.Toolbutton")
+                self.not_pre_processed_participants_buttons.append(pseudo_checkbutton)
+                self.processing.loc[index, 'Processable'] = True
             else:
                 pseudo_checkbutton.config(state="disabled", style="danger.Outline.Toolbutton")
-        self.valid_participants = self.participants.loc[self.participants['Pre-processable']==True]
+                
+        self.valid_participants = self.processing.loc[self.processing['Processable']==True]
         
     def set_participants_state(self, participants, new_state):
         for index, row in participants.iterrows():
@@ -624,21 +632,21 @@ class ExperimentProcessingInterface(ExperimentInterface):
         else:
             new_state = ['!selected']
             
-        self.select_non_pre_processed_participants_checkbutton.state(new_state)
-        self.select_pre_processed_participants_checkbutton.state(new_state)
+        self.select_non_processed_participants_checkbutton.state(new_state)
+        self.select_processed_participants_checkbutton.state(new_state)
         self.set_participants_state(self.valid_participants, new_state)                
         
-    def select_not_pre_processed_participants(self):
+    def select_not_processed_participants(self):
         #get the state of the checkbutton
-        select_not_pre_processed = self.select_non_pre_processed_participants_checkbutton.instate(['selected'])
+        select_not_pre_processed = self.select_non_processed_participants_checkbutton.instate(['selected'])
         if select_not_pre_processed:
             new_state = ['selected']
         else:
             new_state = ['!selected']
         print(f"Select not pre-processed: {select_not_pre_processed}")
         
-        pre_processed_participants = self.valid_participants.loc[~(self.valid_participants['Pre-processed']==True)]
-        self.set_participants_state(pre_processed_participants, new_state)
+        not_processed_participants = self.valid_participants.loc[~(self.valid_participants['Status']==self.already_processed_label)]
+        self.set_participants_state(not_processed_participants, new_state)
             
         already_checked = self.select_all_participants_checkbutton.instate(['selected'])
         deselect_alls = already_checked and not select_not_pre_processed        
@@ -646,16 +654,16 @@ class ExperimentProcessingInterface(ExperimentInterface):
         if deselect_alls:
             self.select_all_participants_checkbutton.state(['!selected'])
             
-    def select_pre_processed_participants(self):
+    def select_processed_participants(self):
         #get the state of the checkbutton
-        select_pre_processed =  self.select_pre_processed_participants_checkbutton.instate(['selected'])
+        select_pre_processed =  self.select_processed_participants_checkbutton.instate(['selected'])
         if select_pre_processed:
             new_state = ['selected']
         else:
             new_state = ['!selected']
         
-        pre_processed_participants = self.valid_participants.loc[self.valid_participants['Pre-processed']]
-        self.set_participants_state(pre_processed_participants, new_state)
+        processed_participants = self.valid_participants.loc[self.valid_participants['Status']==self.already_processed_label]
+        self.set_participants_state(processed_participants, new_state)
             
         already_checked = self.select_all_participants_checkbutton.instate(['selected'])
         deselect_alls = already_checked and not select_pre_processed        
@@ -663,218 +671,202 @@ class ExperimentProcessingInterface(ExperimentInterface):
             self.select_all_participants_checkbutton.state(['!selected'])
         
     def select_participant(self, pseudo):
-        # if not self.all_participants_checkbuttons[pseudo].instate(['selected']):
-        self.experiment.select_participant(pseudo)
-        # count the number of selected participants in the section.participants_database and enable the button if at least one participant is selected
-        participants = self.experiment.get_participants()
-        print(participants)
-        print(participants.loc[participants['To Pre-process']==True])
-        nb_selected_participants = len(participants.loc[participants['To Pre-process']==True])
-        print(nb_selected_participants)
+        nb_selected_participants = self.experiment.select_participant(pseudo)
         if nb_selected_participants>0:
-            self.pre_process_participants_button.config(state="normal")
+            self.process_participants_button.config(state="normal")
         else:
-            self.pre_process_participants_button.config(state="disabled")
+            self.process_participants_button.config(state="disabled")
             
-    def pre_process_selected_participants(self):        
-        self.pre_process_participants_button.config(state="disabled")
-        self.experiment.pre_process_selected_participants()
+    def process_selected_participants(self):        
+        self.process_participants_button.config(state="disabled")
+        self.experiment.process_selected_participants(self.process_labels)
         self.experiment.refresh_session()
         self.build_participants_layout()
         self.load_participants()
         
+class ExperimentPreProcessingInterface(ExperimentProcessingInterface):
+    def __init__(self):
+        super().__init__(mode = "Pre-processing")
+        print("Building pre-processing interface")
+        self.ready_to_process_labels = ['Ready to pre-process']
+        self.to_process_label = 'To Process'
+        self.already_processed_label = 'Pre-processed'
+        self.partially_processed_label = 'Partially pre-processed'
         
-class ExperimentReplayInterface(ExperimentInterface):
+        self.trial_label_processed = ''
+        self.process_labels = {'Name' : 'Pre-processing',
+                               'Processabe': self.ready_to_process_labels,
+                               'Already processed': self.already_processed_label}
+        
+    def build_participants_layout(self):
+        super().build_participants_layout()
+        self.select_non_processed_participants_checkbutton.config(text="Select all not pre-processed participants")
+        self.select_processed_participants_checkbutton.config(text="Select all pre-processed participants")
+        
+class ExperimentReplayInterface(ExperimentProcessingInterface):
     def __init__(self):
         super().__init__(mode = "Replay")
         self.pseudo_button_default_state = ['!alternate']
         print("Building replay interface")
+        self.ready_to_process_labels = ['Partially pre-processed', 'Pre-processed']
+        self.already_processed_label = 'Replayed'
+        self.partially_processed_label = 'Partially replayed'
+        
+        self.trial_label_processed = ' pre-processed'
+        self.process_labels = {'Name' : 'Replay',
+                               'Processabe': self.ready_to_process_labels,
+                               'Already processed': self.already_processed_label}
     
     def build_participants_layout(self):
-        if self.participants_frame is not None:
-            self.participants_frame.destroy()
-        # add a ttk.label to this frame for the title of the database
-        self.participants_frame = ttk.Labelframe(self.root, text="Choose participants to pre-process", padding=10)
-        #add the label to the root
-        self.participants_frame.pack()
+        super().build_participants_layout()
+        self.select_non_processed_participants_checkbutton.config(text="Select all not replayed participants")
+        self.select_processed_participants_checkbutton.config(text="Select all pre-processed participants")
+        # if self.participants_frame is not None:
+        #     self.participants_frame.destroy()
+        # # add a ttk.label to this frame for the title of the database
+        # self.participants_frame = ttk.Labelframe(self.root, text="Choose participants to pre-process", padding=10)
+        # #add the label to the root
+        # self.participants_frame.pack()
         
-        self.select_alls_grid = ttk.Frame(self.participants_frame)
-        self.select_alls_grid.pack(pady=10)
-        self.select_all_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all participants", command=self.select_all_participants)
-        self.select_all_participants_checkbutton.grid(row=0, column=0)
-        self.select_all_participants_checkbutton.state(self.pseudo_button_default_state)
+        # self.select_alls_grid = ttk.Frame(self.participants_frame)
+        # self.select_alls_grid.pack(pady=10)
         
-        self.select_non_pre_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all not processed participants", command=self.select_not_pre_processed_participants)
-        self.select_non_pre_processed_participants_checkbutton.grid(row=0, column=1)
-        self.select_non_pre_processed_participants_checkbutton.state(self.pseudo_button_default_state)
+        # self.select_all_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all participants", command=self.select_all_participants)
+        # self.select_all_participants_checkbutton.grid(row=0, column=0)
+        # self.select_all_participants_checkbutton.state(self.pseudo_button_default_state)
         
-        self.select_pre_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all processed participants", command=self.select_pre_processed_participants)
-        self.select_pre_processed_participants_checkbutton.grid(row=0, column=2)
-        self.select_pre_processed_participants_checkbutton.state(self.pseudo_button_default_state)
+        # self.select_non_pre_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all not processed participants", command=self.select_not_processed_participants)
+        # self.select_non_pre_processed_participants_checkbutton.grid(row=0, column=1)
+        # self.select_non_pre_processed_participants_checkbutton.state(self.pseudo_button_default_state)
         
-        #add a ttk.frame to self.root for the pseudos database
-        self.participants_list_frame = ttk.Frame(self.participants_frame)
-        # add the frame to the root
-        self.participants_list_frame.pack(pady=10)
+        # self.select_pre_processed_participants_checkbutton = ttk.Checkbutton(self.select_alls_grid, text="Select all processed participants", command=self.select_processed_participants)
+        # self.select_pre_processed_participants_checkbutton.grid(row=0, column=2)
+        # self.select_pre_processed_participants_checkbutton.state(self.pseudo_button_default_state)
+        
+        # #add a ttk.frame to self.root for the pseudos database
+        # self.participants_list_frame = ttk.Frame(self.participants_frame)
+        # # add the frame to the root
+        # self.participants_list_frame.pack(pady=10)
         
         # add a ttk.button to launch the processing of the selected participants
-        self.pre_process_participants_button = ttk.Button(self.participants_frame, text="Pre-process participants", command=self.pre_process_selected_participants)
-        self.pre_process_participants_button.pack(pady=10)
-        self.pre_process_participants_button.config(state="disabled")
-        
-    def build_experimental_parameters_layout(self):
-        last_row = super().build_experimental_parameters_layout_from_list()
-        for entry in self.parameters_entry_dict.values():
-            entry.config(state="disabled")
-        return last_row
-    
-    def select_session(self, selected_session):
-        super().select_session(selected_session)
-        session_label = self.experiment.get_session_label()
-        params = self.experiment.get_session_experimental_parameters()  
-        if params is None:
-            messagebox.showerror("Error", "The selected session does not have a parameters file")
-            return
-        else:       
-            self.build_experimental_parameters_layout()
-            self.display_session_experimental_parameters(params) 
-            self.build_participants_layout()
-            self.load_participants()
-            self.session_text.set(session_label)
+        # self.pre_process_participants_button = ttk.Button(self.participants_frame, text="Pre-process participants", command=self.pre_process_selected_participants)
+        # self.pre_process_participants_button.pack(pady=10)
+        # self.pre_process_participants_button.config(state="disabled")
+
             
             
     def load_participants(self):       
-        self.participants = self.experiment.get_session_participants()
+        super().load_participants()
+        # self.participants = self.experiment.get_session_participants()
         
-        print(self.participants)
-        # get the number of rows in the database
-        nb_pseudos = len(self.participants.index)-1
+        # print(self.participants)
+        # # get the number of rows in the database
+        # nb_pseudos = len(self.participants.index)-1
         
-        #add a ttk.checkbutton to this frame for each pseudo in the database, ignoring the header, distribute them vertically and horizontally
-        for index, row in self.participants.iterrows():
-            pseudo = row['Pseudo']
-            #get the date of the experiment as pandas timestamp
-            date = pd.Timestamp(row['Date'])
-            # format date to remove the seconds, and keep only the day, month and year
-            date = date.strftime("%d/%m/%Y")
-            nb_trials=row['Number of trials']
-            button_text = f"{pseudo} \n({date} - {int(nb_trials)} trials)"
-            pseudo_checkbutton = ttk.Checkbutton(self.participants_list_frame, text=button_text, command=lambda pseudo=pseudo: self.select_participant(pseudo))
-            # create style variation for the checkbutton with smaller font size
-            style = ttk.Style()
-            # center the text for all checkbuttons styles
-            style.configure("primary.Outline.Toolbutton", justify="center")
-            style.configure("success.Outline.Toolbutton", justify="center")
-            style.configure("warning.Outline.Toolbutton", justify="center")
-            style.configure("danger.Outline.Toolbutton", justify="center")
+        # #add a ttk.checkbutton to this frame for each pseudo in the database, ignoring the header, distribute them vertically and horizontally
+        # for index, row in self.participants.iterrows():
+        #     pseudo = row['Pseudo']
+        #     #get the date of the experiment as pandas timestamp
+        #     date = pd.Timestamp(row['Date'])
+        #     # format date to remove the seconds, and keep only the day, month and year
+        #     date = date.strftime("%d/%m/%Y")
+        #     nb_trials=row['Number of trials']
+        #     button_text = f"{pseudo} \n({date} - {int(nb_trials)} trials)"
+        #     pseudo_checkbutton = ttk.Checkbutton(self.participants_list_frame, text=button_text, command=lambda pseudo=pseudo: self.select_participant(pseudo))
+        #     # create style variation for the checkbutton with smaller font size
+        #     style = ttk.Style()
+        #     # center the text for all checkbuttons styles
+        #     style.configure("primary.Outline.Toolbutton", justify="center")
+        #     style.configure("success.Outline.Toolbutton", justify="center")
+        #     style.configure("warning.Outline.Toolbutton", justify="center")
+        #     style.configure("danger.Outline.Toolbutton", justify="center")
             
-            row_index, column_index = ex.get_row_and_column_index_from_index(index, nb_pseudos)
-            pseudo_checkbutton.grid(row=row_index, column=column_index)
+        #     row_index, column_index = ex.get_row_and_column_index_from_index(index, nb_pseudos)
+        #     pseudo_checkbutton.grid(row=row_index, column=column_index)
         
-            #add the checkbutton to the list of checkbuttons
-            self.all_participants_checkbuttons[pseudo] = pseudo_checkbutton
-            # disable the checkbutton if the participant has not all data available
-            if row['All data available']:
-                #change the color of the checkbutton if the participant has already been pre-processed
-                if row['Pre-processed']:
-                    # change the style of the checkbutton
-                    pseudo_checkbutton.config(style="success.Outline.Toolbutton")
-                    self.pre_processed_participants_buttons.append(pseudo_checkbutton)
-                else:
-                    pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
-                    self.not_pre_processed_participants_buttons.append(pseudo_checkbutton)
+        #     #add the checkbutton to the list of checkbuttons
+        #     self.all_participants_checkbuttons[pseudo] = pseudo_checkbutton
+        # for index, row in self.participants.iterrows():
+        #     pseudo_checkbutton = self.all_participants_checkbuttons[row['Pseudo']]
+        #     # disable the checkbutton if the participant has not all data available
+        #     if row['All data available']:
+        #         #change the color of the checkbutton if the participant has already been pre-processed
+        #         if row['Pre-processed']:
+        #             # change the style of the checkbutton
+        #             pseudo_checkbutton.config(style="success.Outline.Toolbutton")
+        #             self.pre_processed_participants_buttons.append(pseudo_checkbutton)
+        #         else:
+        #             pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
+        #             self.not_pre_processed_participants_buttons.append(pseudo_checkbutton)
                 
-                pseudo_checkbutton.state(self.pseudo_button_default_state)
-                pseudo_checkbutton.state(['!selected'])
-            elif row['Folder available'] and row['Combinations available']:
-                if row['Pre-processed']:
-                    pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
-                else:
-                    pseudo_checkbutton.config(style="warning.Outline.Toolbutton")
+        #         pseudo_checkbutton.state(self.pseudo_button_default_state)
+        #         pseudo_checkbutton.state(['!selected'])
+        #     elif row['Folder available'] and row['Combinations available']:
+        #         if row['Pre-processed']:
+        #             pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
+        #         else:
+        #             pseudo_checkbutton.config(style="warning.Outline.Toolbutton")
                     
                 
-            else:
-                pseudo_checkbutton.config(state="disabled", style="danger.Outline.Toolbutton")
-        self.valid_participants = self.participants.loc[self.participants['Pre-processable']==True]
+        #     else:
+        #         pseudo_checkbutton.config(state="disabled", style="danger.Outline.Toolbutton")
+        # self.valid_participants = self.participants.loc[self.participants['Pre-processable']==True]
+                   
         
-    def set_participants_state(self, participants, new_state):
-        for index, row in participants.iterrows():
-            pseudo = row['Pseudo']
-            checkbutton = self.all_participants_checkbuttons[pseudo]            
-            change = not checkbutton.instate(new_state)
-            print(f"Change state of {pseudo} to {new_state} ? {change}")
-            #checkbutton.state(new_state) 
-            if change:
-                checkbutton.invoke()
-                print(f"Changed state of {pseudo} to {new_state}")
-                
-    def select_all_participants(self):
-        #get the state of the checkbutton
-        select_all = self.select_all_participants_checkbutton.instate(['selected'])
-        print(f"select all : {select_all}")
-        if select_all:
-            new_state = ['selected']
-        else:
-            new_state = ['!selected']
+    # def select_not_processed_participants(self):
+    #     #get the state of the checkbutton
+    #     select_not_pre_processed = self.select_non_pre_processed_participants_checkbutton.instate(['selected'])
+    #     if select_not_pre_processed:
+    #         new_state = ['selected']
+    #     else:
+    #         new_state = ['!selected']
+    #     print(f"Select not pre-processed: {select_not_pre_processed}")
+        
+    #     pre_processed_participants = self.valid_participants.loc[~(self.valid_participants['Pre-processed']==True)]
+    #     self.set_participants_state(pre_processed_participants, new_state)
             
-        self.select_non_pre_processed_participants_checkbutton.state(new_state)
-        self.select_pre_processed_participants_checkbutton.state(new_state)
-        self.set_participants_state(self.valid_participants, new_state)                
+    #     already_checked = self.select_all_participants_checkbutton.instate(['selected'])
+    #     deselect_alls = already_checked and not select_not_pre_processed        
         
-    def select_not_pre_processed_participants(self):
-        #get the state of the checkbutton
-        select_not_pre_processed = self.select_non_pre_processed_participants_checkbutton.instate(['selected'])
-        if select_not_pre_processed:
-            new_state = ['selected']
-        else:
-            new_state = ['!selected']
-        print(f"Select not pre-processed: {select_not_pre_processed}")
-        
-        pre_processed_participants = self.valid_participants.loc[~(self.valid_participants['Pre-processed']==True)]
-        self.set_participants_state(pre_processed_participants, new_state)
+    #     if deselect_alls:
+    #         self.select_all_participants_checkbutton.state(['!selected'])
             
-        already_checked = self.select_all_participants_checkbutton.instate(['selected'])
-        deselect_alls = already_checked and not select_not_pre_processed        
+    # def select_processed_participants(self):
+    #     #get the state of the checkbutton
+    #     select_pre_processed =  self.select_pre_processed_participants_checkbutton.instate(['selected'])
+    #     if select_pre_processed:
+    #         new_state = ['selected']
+    #     else:
+    #         new_state = ['!selected']
         
-        if deselect_alls:
-            self.select_all_participants_checkbutton.state(['!selected'])
+    #     pre_processed_participants = self.valid_participants.loc[self.valid_participants['Pre-processed']]
+    #     self.set_participants_state(pre_processed_participants, new_state)
             
-    def select_pre_processed_participants(self):
-        #get the state of the checkbutton
-        select_pre_processed =  self.select_pre_processed_participants_checkbutton.instate(['selected'])
-        if select_pre_processed:
-            new_state = ['selected']
-        else:
-            new_state = ['!selected']
+    #     already_checked = self.select_all_participants_checkbutton.instate(['selected'])
+    #     deselect_alls = already_checked and not select_pre_processed        
+    #     if deselect_alls:
+    #         self.select_all_participants_checkbutton.state(['!selected'])
         
-        pre_processed_participants = self.valid_participants.loc[self.valid_participants['Pre-processed']]
-        self.set_participants_state(pre_processed_participants, new_state)
+    # def select_participant(self, pseudo):
+    #     # if not self.all_participants_checkbuttons[pseudo].instate(['selected']):
+    #     self.experiment.select_participant(pseudo)
+    #     # count the number of selected participants in the section.participants_database and enable the button if at least one participant is selected
+    #     participants = self.experiment.get_session_participants()
+    #     print(participants)
+    #     print(participants.loc[participants[self.to_process_label]==True])
+    #     nb_selected_participants = len(participants.loc[participants[self.to_process_label]==True])
+    #     print(nb_selected_participants)
+    #     if nb_selected_participants>0:
+    #         self.pre_process_participants_button.config(state="normal")
+    #     else:
+    #         self.pre_process_participants_button.config(state="disabled")
             
-        already_checked = self.select_all_participants_checkbutton.instate(['selected'])
-        deselect_alls = already_checked and not select_pre_processed        
-        if deselect_alls:
-            self.select_all_participants_checkbutton.state(['!selected'])
-        
-    def select_participant(self, pseudo):
-        # if not self.all_participants_checkbuttons[pseudo].instate(['selected']):
-        self.experiment.select_participant(pseudo)
-        # count the number of selected participants in the section.participants_database and enable the button if at least one participant is selected
-        participants = self.experiment.get_participants()
-        print(participants)
-        print(participants.loc[participants['To Pre-process']==True])
-        nb_selected_participants = len(participants.loc[participants['To Pre-process']==True])
-        print(nb_selected_participants)
-        if nb_selected_participants>0:
-            self.pre_process_participants_button.config(state="normal")
-        else:
-            self.pre_process_participants_button.config(state="disabled")
-            
-    def pre_process_selected_participants(self):        
-        self.pre_process_participants_button.config(state="disabled")
-        self.experiment.pre_process_selected_participants()
-        self.experiment.refresh_session()
-        self.build_participants_layout()
-        self.load_participants()
+    # def process_selected_participants(self):        
+    #     self.pre_process_participants_button.config(state="disabled")
+    #     self.experiment.pre_process_selected_participants()
+    #     self.experiment.refresh_session()
+    #     self.build_participants_layout()
+    #     self.load_participants()
         
 
 class ExperimentAnalysisInterface(ExperimentInterface):
@@ -903,7 +895,7 @@ def kill_gpu_processes():
     # use the command nvidia-smi and then grep "grasp_int" and "python" to get the list of processes running on the gpu
     # execute the command in a subprocess and get the output
     try:
-        processes = subprocess.check_output("nvidia-smi | grep 'grasp_int' | grep 'python'", shell=True)
+        processes = subprocess.check_output("nvidia-smi | grep 'i_grip' | grep 'python'", shell=True)
         # split the output into lines
         processes = processes.splitlines()
         # get rid of the b' at the beginning of each line
@@ -924,10 +916,12 @@ def kill_gpu_processes():
 if __name__ == "__main__":
     kill_gpu_processes()
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', choices=['record', 'replay', 'analysis'], default = 'record', help="Mode of the interface")
+    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'replay', help="Mode of the interface")
     args = vars(parser.parse_args())
     if args['mode'] == 'record':
         interface = ExperimentRecordingInterface()
+    elif args['mode'] == 'pre_processing':
+        interface = ExperimentPreProcessingInterface()
     elif args['mode'] == 'replay':
         interface = ExperimentReplayInterface()
     elif args['mode'] == 'analysis':

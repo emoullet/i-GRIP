@@ -18,7 +18,6 @@ class ExperimentReplayer:
         self.display_replay = display_replay
         
         device_data = np.load('/home/emoullet/Documents/i-GRIP/DATA/Session_1/cam_19443010910F481300.npz')
-        self.hand_detector = hd.HybridOAKMediapipeDetector(replay=True, cam_params= device_data, resolution=resolution, fps=fps)
         self.object_detector = o2d.get_object_detector(dataset,
                                                        device_data)
         self.object_pose_estimator = ope.get_pose_estimator(dataset,
@@ -30,26 +29,83 @@ class ExperimentReplayer:
         else:
             self.name = name
         self.scene = sc.LiveScene( device_data, name = f'{self.name}_scene')
-        # self.scene = sc.ReplayScene( device_data, name = f'{self.name}_scene')
-        self.hand_detector.start()
     
     def get_device_id(self):
         return self.device_id
     
-    def replay(self, replay, name = None):
+    
+
+    def replay(self, gh):
+        print(self.__dict__)
+        print('start')
+        detect = True
+        obj_path = './YCBV_test_pictures/mustard_back.png'
+        obj_path = './YCBV_test_pictures/YCBV2.png'
+        obj_path = './YCBV_test_pictures/cap2.png'
+        obj_img = cv2.imread(obj_path)
+        # obj_img = cv2.cvtColor(obj_img, cv2.COLOR_BGR2RGB)
+        while True:
+            img = obj_img
+            if False:
+                pass
+            else:
+                render_img = img.copy()
+                to_process_img = img.copy()
+                cv2.cvtColor(to_process_img, cv2.COLOR_RGB2BGR, to_process_img)
+                
+                    #replace pixels from self.img with obj_img
+                    
+                if detect:
+                    self.object_detections = self.object_detector.detect(to_process_img)
+                    if self.object_detections is not None:
+                        detect = False
+                        print(f'detect {self.object_detections.bboxes}')
+                    print('detect')
+                else:
+                    self.object_detections = None
+
+                # Object pose estimation
+                self.objects_pose = self.object_pose_estimator.estimate(to_process_img, detections = self.object_detections)
+                print(f'pose {self.objects_pose}')
+                self.scene.update_objects(self.objects_pose)
+            print('lilililiiiiiii')
+            k = cv2.waitKey(20)
+            # if k == 32:
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     print('DOOOOOOOOOOOOOOOOOOOO')
+            #     start_event.set()
+            if k == 32:
+                print('DETEEEEEEEEEEEEEEEEEECT')
+                print('DETEEEEEEEEEEEEEEEEEECT')
+                print('DETEEEEEEEEEEEEEEEEEECT')
+                print('DETEEEEEEEEEEEEEEEEEECT')
+                print('DETEEEEEEEEEEEEEEEEEECT')
+                print('DETEEEEEEEEEEEEEEEEEECT')
+                print('DETEEEEEEEEEEEEEEEEEECT')
+                print('DETEEEEEEEEEEEEEEEEEECT')
+            self.scene.render(render_img)
+            cv2.imshow('image', render_img)
+            if k==27:
+                print('end')
+                self.stop()
+                break
+    
+    def run(self, replay, name = None):
         
-        self.hand_detector.load_replay(replay)
         
         if name is not None:
             cv_window_name = f'{self.name} : Replaying {name}'
         else:
             cv_window_name = f'{self.name} : Replaying'
         detect = True
-        
-        for timestamp in self.hand_detector.get_timestamps():
-            success, img = self.hand_detector.next_frame()
-            if not success:
-                continue
+        for i in range(50):
             obj_path = './YCBV_test_pictures/cap2.png'
             img = cv2.imread(obj_path)
             render_img = img.copy()
@@ -79,7 +135,7 @@ class ExperimentReplayer:
             if self.display_replay:
                 self.scene.render(render_img)
                 cv2.imshow(cv_window_name, render_img)
-            
+            print('lalalalalalalaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 print('end')
                 self.stop()
@@ -93,7 +149,6 @@ class ExperimentReplayer:
     def stop(self):
         print("Stopping experiment replayer...")
         print("Stopping hand detector...")
-        self.hand_detector.stop()
         print("Stopped hand detector...")
         print("Stopping object estimator...")
         self.object_pose_estimator.stop()

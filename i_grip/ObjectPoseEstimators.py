@@ -24,6 +24,7 @@ class KnownObjectPoseEstimator:
             fy=cam_mat[1,1], cy=cam_mat[1,2],
             resolution=img_resolution,
         )
+        print(f'Intrinsics: {intrinsics}')
         self.dataset = dataset
         #self.windows = [((0,0),(1152,648))]
 
@@ -67,10 +68,13 @@ class KnownObjectPoseEstimator:
             return {}
         # Predict poses using cosypose
         #print(detections)
+        print(f'pose_estimation_prior {self.pose_estimation_prior}')
+        # print(f'detections {detections.bboxes}')
         predict = self.pose_estimation_prior is not None or detections is not None
         if predict:
             # image = torch.as_tensor(np.stack([self.format_crop(image), ])).permute(0, 3, 1, 2).cuda().float() / 255
             img = torch.as_tensor(np.stack([image, ])).permute(0, 3, 1, 2).cuda().float() / 255
+            cv2.imwrite('/home/emoullet/GitHub/i-GRIP/tset/img.png', image)
             if detections is not None and not self.fuse_detections:
             #if detections is not None:
                 self.pose_estimation_prior = None
@@ -83,7 +87,13 @@ class KnownObjectPoseEstimator:
                 n_coarse_iterations=1
             else:
                 n_coarse_iterations = 0
-
+            inps = dict(
+                images=img, K=self.K,
+                data_TCO_init=self.pose_estimation_prior,
+                n_coarse_iterations=n_coarse_iterations,
+                n_refiner_iterations=self.n_refiner_iterations,
+                detections=detections)
+            print(f'inps : {inps}')
             self.pose_predictions, _ = self.predict(
                 images=img, K=self.K,
                 data_TCO_init=self.pose_estimation_prior,
@@ -91,12 +101,12 @@ class KnownObjectPoseEstimator:
                 n_refiner_iterations=self.n_refiner_iterations,
                 detections=detections
             )
-            # print('ITER')
-            # print(self.pose_predictions.poses)
-            # print(self.pose_predictions.poses_input)
-            # print(self.pose_predictions.K_crop)
-            # print(self.pose_predictions.boxes_rend)
-            # print(self.pose_predictions.boxes_crop)
+            print('ITER')
+            print(self.pose_predictions.poses)
+            print(self.pose_predictions.poses_input)
+            print(self.pose_predictions.K_crop)
+            print(self.pose_predictions.boxes_rend)
+            print(self.pose_predictions.boxes_crop)
             # exit()
         else:
                 self.pose_predictions = None

@@ -160,6 +160,7 @@ class HybridOAKMediapipeDetector():
         if not self.video.isOpened():
             print("Error reading video") 
             exit()
+        print(replay.keys())
         self.timestamps = replay['Timestamps']
         self.depth_maps = replay['Depth_maps']
         self.init_landmarker()
