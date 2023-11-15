@@ -1,33 +1,42 @@
 import os
 import shutil
-import subprocess
 import tkinter as tk
 from tkinter import ttk, font
 from tkinter import filedialog, messagebox
-from ttkbootstrap import Style
-# import ExperimentReplay as er
-import depthai
-import cv2
+# from ttkbootstrap import Style
 import pandas as pd
-import numpy as np
+# import ExperimentReplayer2 as erp
 import Experiment as ex
+
+from i_grip.utils import kill_gpu_processes
+
+
 import argparse
+import cv2
+import numpy as np
+
+
 _DEFAULT_MAIN_PATH = "/home/emoullet/Documents/i-GRIP/DATA"
 
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 class ExperimentInterface:
     def __init__(self,mode = None):     
         self.name = f"i-GRIP {mode} Interface"
         self.experiment = ex.Experiment(name = self.name, mode = mode)
-        self.build_window()
+        self.build_window(mode)
         self.params_separator = ';'
         
-    def build_window(self):
-        style = Style(theme="superhero")
-        carlito_font = font.Font(family='Carlito', size=15)
-        style.configure('.', font=carlito_font)
-        style.configure('header.TLabel', font=('Carlito', 20, 'bold'))
-        self.root =style.master
+    def build_window(self, mode):
+        if mode != 'Replay':
+            from ttkbootstrap import Style
+            style = Style(theme="superhero")
+            carlito_font = font.Font(family='Carlito', size=15)
+            style.configure('.', font=carlito_font)
+            style.configure('header.TLabel', font=('Carlito', 20, 'bold'))
+            self.root =style.master
+        else:
+            self.root = tk.Tk()
         self.root.title(self.name)
         self.root.geometry("1280x1200")  # Set the window size to 640x640 pixels
         self.root.protocol("WM_DELETE_WINDOW", self.on_close_button_click)
@@ -891,30 +900,10 @@ def get_row_and_column_index_from_index(index, nb_items_total):
     return row_index, column_index, nb_rows, nb_columns
         
 
-def kill_gpu_processes():
-    # use the command nvidia-smi and then grep "grasp_int" and "python" to get the list of processes running on the gpu
-    # execute the command in a subprocess and get the output
-    try:
-        processes = subprocess.check_output("nvidia-smi | grep 'i_grip' | grep 'python'", shell=True)
-        # split the output into lines
-        processes = processes.splitlines()
-        # get rid of the b' at the beginning of each line
-        processes = [str(process)[2:] for process in processes]
-        ids=[]
-        # loop over the lines
-        for process in processes:
-            # split the line into words and get the fifth word, which is the process id
-            id = process.split()[4]
-            ids.append(id)
-            # kill the process
-            kill_command = f"sudo kill -9 {id}"
-            subprocess.call(kill_command, shell=True)
-        print(f"Killed processes with ids {ids}")
-    except Exception as e:
-        print(f"No remnant processes found on the gpu")
     
 if __name__ == "__main__":
     kill_gpu_processes()
+    
     parser = argparse.ArgumentParser()
     parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'replay', help="Mode of the interface")
     args = vars(parser.parse_args())

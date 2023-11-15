@@ -7,11 +7,11 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from i_grip import databases_utils as db
-from i_grip import Scene as sc
+from i_grip import Scene2 as sc
 import ExperimentRecorder as erc
 import ExperimentPreProcessor as epp
-import ExperimentReplayer2 as erp
-# import ExperimentAnalyzer as ea
+import ExperimentReplayer as erp
+import ExperimentAnalyser as ea
 import threading
 import cv2
 import pandas as pd
@@ -691,6 +691,8 @@ class Participant:
         self.missing_data = []
         self.available_trials = []
         self.missing_trials = []
+        self.replayable_trials = []
+        self.analyzable_trials = []
         self.expe_recorders = []
         self.language = language        
         self.trial_ongoing = False
@@ -1050,8 +1052,10 @@ class Participant:
         for trial in self.available_trials:
             if trial.was_pre_processed():
                 self.nb_pre_processed_trials += 1
+                self.replayable_trials.append(trial)
             if trial.was_replayed():
                 self.nb_replayed_trials += 1
+                self.analyzable_trials.append(trial)
             if trial.was_analyzed():
                 self.nb_analyzed_trials += 1
                 
@@ -1122,7 +1126,7 @@ class Participant:
         # concatenate the two dataframes into a dataframe self.data
         self.data = pd.concat([self.combinations_data, trials_meta_data_df], axis=1)
         #loop over trials
-        for trial in self.available_trials:          
+        for trial in self.replayable_trials:          
             self.progress_display.set_current(f"Replaying trial {trial.label}")  
             self.progress_window.update()
             trial_meta_data = trial.replay(experiment_replayer)
@@ -1142,7 +1146,7 @@ class Participant:
     
     def analyze(self, experiment_analyzer):
         print( f"Analyzing pseudo '{self.pseudo}'")
-        for trial in self.available_trials:
+        for trial in self.analyzable_trials:
             print(f"Analyzing trial {trial.label}")
             self.progress_display.set_current(f"Analyzing trial {trial.label}")  
             self.progress_window.update()
@@ -1266,6 +1270,7 @@ class Trial:
     def was_pre_processed(self):
         if not os.path.exists(self.pre_processing_path):
             pre_processed = False
+            print('Trial {} not pre-processed'.format(self.label))
             return pre_processed
         pre_processed = True
         file_suffixes =  ['depth_map_movement.gzip', 
@@ -1316,12 +1321,19 @@ class Trial:
         return False
     
     def pre_process(self, experiment_pre_processor):
+        if not os.path.exists(self.path):
+            print(f"Trial {self.label} raw data folder not found. This trial cannot be pre-processed and will be skipped.")
+            return False, False, None
         if not os.path.exists(self.pre_processing_path):
             os.mkdir(self.pre_processing_path)
         self.combi_ok, self.face_ok, duration = experiment_pre_processor.process_trial(self.path, self.combination, self.pre_processing_path)
         return self.combi_ok, self.face_ok, duration
     
     def replay(self, experiment_replayer, sequence = 'movement'):
+        if not self.was_pre_processed():
+            print(f'Trial {self.label} not pre-processed. This trial cannot be replayed and will be skipped.')
+            return {}
+        
         if not os.path.exists(self.replay_path):
             os.mkdir(self.replay_path)
         device_id = experiment_replayer.get_device_id()
@@ -1371,6 +1383,8 @@ class Trial:
             object_summary['Timestamps'] = object_data['Timestamps']
             for key in object_keys:
                 object_summary[object_id + '_' + key] = object_data[key]
+            print(f'object_summary: \n{object_summary}')
+            print(f'object_keys: \n{object_keys}')
             # add the object_summary to the main_data starting at the row corresponding to the first timestamp
             self.main_data = pd.merge(self.main_data, object_summary, on='Timestamps', how='left')
         
@@ -1378,6 +1392,10 @@ class Trial:
         return self.meta_data
 
     def analyse(self, experiment_analyser):
+        if not self.was_replayed():
+            print(f'Trial {self.label} not replayed. This trial cannot be analysed and will be skipped.')
+            return
+        
         experiment_analyser.analyse(self.hands_data, self.objects_data)
 
     def save_replay_data(self, device_id):

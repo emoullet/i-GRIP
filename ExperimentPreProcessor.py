@@ -9,7 +9,6 @@ import cv2
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
-from ttkbootstrap import Style
 import os
 import pandas as pd
 import threading
@@ -22,7 +21,6 @@ class ExperimentPreProcessor:
         else:
             self.name = name
         self.x, self.y, self.w, self.h = 150,20,300,400
-        style = Style(theme="superhero")
         # self.processing_window =style.master
         self.processing_window = tk.Toplevel()
         self.processing_window.title(f"{self.name} : Pre-processing")

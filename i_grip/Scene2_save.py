@@ -46,7 +46,7 @@ class Scene :
                                                     show_velocity_cone = True
                                                     )
     
-    def __init__(self, cam_data, name = 'Grasping experiment',  video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS, fps = 30.0, detect_grasping = True, draw_mesh = True) -> None:
+    def __init__(self, cam_data, name = 'Grasping experiment',  video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS, fps = 30.0) -> None:
         self.hands = dict()
         self.objects = dict()
         self.cam_data = cam_data
@@ -63,16 +63,10 @@ class Scene :
         self.fps_objects= 0
         self.fps_detections= 0
         self.name = name
-        self.draw_mesh = draw_mesh
-        
+        self.draw_mesh = True
         self.new_hand_meshes = []
         self.new_object_meshes = []
-        self.hands_to_delete = {}
-        self.objects_to_delete = {}
         self.scene_callback_period = 1.0/fps
-        self.fps = fps
-        self.scene_window = None
-        self.detect_grasping = detect_grasping
         
         if self.draw_mesh:
             self.define_mesh_scene()
@@ -85,135 +79,25 @@ class Scene :
         for obj in objs:
             s+=str(obj)+'\n'
         return s
-
-    def reset(self):   
-        if self.scene_window is None:
-            return
-        print('reset scene')
-        self.stop()
-        # self.hands_to_delete = self.hands
-        # self.objects_to_delete = self.objects
-        self.hands = dict()
-        self.objects = dict()
-        self.time_scene = time.time()
-        self.time_hands = self.time_scene
-        self.time_objects = self.time_hands
-        self.fps_scene = 0
-        self.fps_hands= 0
-        self.fps_objects= 0
-        self.new_hand_meshes = []
-        self.new_object_meshes = []
-        self.scene_callback_period = 1.0/self.fps
-        self.resume_scene_display()
-        self.define_mesh_scene()
     
-
-    def define_mesh_scene(self):
-        self.mesh_scene= tm.Scene()
-        self.mesh_scene.camera.resolution = self.cam_data['resolution']
-        self.mesh_scene.camera.focal= (self.cam_data['matrix'][0,0], self.cam_data['matrix'][1,1])
-        self.mesh_scene.camera.z_far = 3000
-        print('self.cam_data', self.cam_data)
-        X =  0
-        Y =  -250
-        Z = 1000
-        self.test_cone = tm.creation.cone(50,500)
-        # self.mesh_scene.add_geometry(self.test_cone, geom_name='test_cone')
-        self.mesh_scene.camera_transform = tm.transformations.rotation_matrix(np.pi, np.array([0,1,0]), np.array([0,0,0]))
-        frame_origin = np.array([[X, Y, Z],
-                    [X, Y, Z],[X, Y, Z]])
-        frame_axis_directions = np.array([[0, 0, 1],
-                        [0, 1, 0],[1, 0, 0]])
-        frame_visualize = tm.load_path(np.hstack((
-        frame_origin,
-        frame_origin + frame_axis_directions*100)).reshape(-1, 2, 3))
-        self.mesh_scene.add_geometry(frame_visualize, geom_name='mafreme')
-        plane = tm.path.creation.grid(300, count = 10, plane_origin =  np.array([X, Y, Z]), plane_normal = np.array([0,1,0]))
-        cam = tm.creation.camera_marker(self.mesh_scene.camera, marker_height = 300)
-
-        self.mesh_scene.add_geometry(plane, geom_name='plane')
-        
-        
-        self.t_scene = threading.Thread(target=self.display_meshes)
-        self.run_scene_display = True
-        self.t_scene.start()
-        
     def display_meshes(self):
         print('Starting mesh display thread')
         self.scene_window = self.mesh_scene.show(callback=self.update_meshes,callback_period=self.scene_callback_period, line_settings={'point_size':20}, start_loop=False)
         pyglet.app.run()
         print('Mesh display thread closed')
 
-    def pause_scene_display(self):
-        print('pause scene display')
-        self.run_scene_display = False
-    
-    def resume_scene_display(self):
-        print('resume scene display')
-        self.run_scene_display = True
-        
-    def update_meshes(self, scene):
-        if self.run_scene_display:
-            self.update_hands_meshes(scene)
-            self.update_object_meshes(scene)
-            if self.detect_grasping:
-                self.check_all_targets(scene)
-
     def update_hands_meshes(self, scene):
-        hands_to_delete = self.hands_to_delete.copy().keys()
-        self.hands_to_delete = {}
-        new_hand_meshes = self.new_hand_meshes.copy()    
-        self.new_hand_meshes = []
-        hands = self.hands.copy().items()
-        
-        if len(hands_to_delete)>0:
-            print
-            print(f'scene geometry {scene.geometry}')
-        for label in hands_to_delete:
-            scene.delete_geometry(label)
-            print(f'delete hands {label}')
-        if len(hands_to_delete)>0:
-            print(f'scene geometry {scene.geometry}')
-        
-        for i in range(len(new_hand_meshes)):
-            new = new_hand_meshes.pop(0)
+        for i in range(len(self.new_hand_meshes)):
+            new = self.new_hand_meshes.pop(0)
             scene.add_geometry(new['mesh'], geom_name = new['name'])
         
+        hands = self.hands.copy().items()
         for label, hand in hands:      
             hand.update_mesh()       
             scene.graph.update(label,matrix = hand.get_mesh_transform(), geometry = label)
             if self.show_velocity_cone:
                 scene.delete_geometry(hand.label+'vel_cone')
                 scene.add_geometry(hand.ray_visualize, geom_name=hand.label+'vel_cone')
-
-    def update_object_meshes(self, scene):     
-        objects_to_delete = self.objects_to_delete.copy().keys()
-        self.objects_to_delete = {}
-        new_object_meshes = self.new_object_meshes.copy()
-        self.new_object_meshes = []
-        objects = self.objects.copy().items()
-        
-        if len(objects_to_delete)>0:
-            print('avant delete')
-            print(f'scene geometry {scene.geometry}')   
-        for label in objects_to_delete:
-            scene.delete_geometry(label)
-            print(f'delete objects {label}')
-        if len(objects_to_delete)>0:
-            print('apres delete')
-            print(f'scene geometry {scene.geometry}')
-            
-        for i in range(len(new_object_meshes)):
-            new = new_object_meshes.pop(0)
-            scene.add_geometry(new['mesh'], geom_name = new['name'])
-            # self.objects_collider.add_object(new['name'], new['mesh'])            
-            print('add here')
-            print(scene.geometry)
-            print('add there')
-
-        for label, obj in objects:
-            obj.update_mesh()
-            scene.graph.update(label, matrix=obj.get_mesh_transform(), geometry = label)
 
     def check_all_targets(self, scene):
         targets = {}
@@ -241,6 +125,52 @@ class Scene :
                 self.objects[olabel].set_target_info(target_info)
 
 
+    def update_object_meshes(self, scene):
+        for i in range(len(self.new_object_meshes)):
+            new = self.new_object_meshes.pop(0)
+            scene.add_geometry(new['mesh'], geom_name = new['name'])
+            # self.objects_collider.add_object(new['name'], new['mesh'])            
+            print('add here')
+            print(scene.geometry)
+            print('add there')
+
+        objs = self.objects.copy().items()
+        for label, obj in objs:
+            obj.update_mesh()
+            scene.graph.update(label, matrix=obj.get_mesh_transform(), geometry = label)
+
+    def update_meshes(self, scene):
+        self.update_hands_meshes(scene)
+        self.update_object_meshes(scene)
+        self.check_all_targets(scene)
+
+    def define_mesh_scene(self):
+        self.mesh_scene= tm.Scene()
+        self.mesh_scene.camera.resolution = self.cam_data['resolution']
+        self.mesh_scene.camera.focal= (self.cam_data['matrix'][0,0], self.cam_data['matrix'][1,1])
+        self.mesh_scene.camera.z_far = 3000
+        print('self.cam_data', self.cam_data)
+        X =  0
+        Y =  -250
+        Z = 1000
+        self.test_cone = tm.creation.cone(50,500)
+        # self.mesh_scene.add_geometry(self.test_cone, geom_name='test_cone')
+        self.mesh_scene.camera_transform = tm.transformations.rotation_matrix(np.pi, np.array([0,1,0]), np.array([0,0,0]))
+        frame_origin = np.array([[X, Y, Z],
+                    [X, Y, Z],[X, Y, Z]])
+        frame_axis_directions = np.array([[0, 0, 1],
+                        [0, 1, 0],[1, 0, 0]])
+        frame_visualize = tm.load_path(np.hstack((
+        frame_origin,
+        frame_origin + frame_axis_directions*100)).reshape(-1, 2, 3))
+        self.mesh_scene.add_geometry(frame_visualize, geom_name='mafreme')
+        plane = tm.path.creation.grid(300, count = 10, plane_origin =  np.array([X, Y, Z]), plane_normal = np.array([0,1,0]))
+        cam = tm.creation.camera_marker(self.mesh_scene.camera, marker_height = 300)
+
+        self.mesh_scene.add_geometry(plane, geom_name='plane')
+        self.t_scene = threading.Thread(target=self.display_meshes)
+        self.t_scene.start()
+
     def evaluate_grasping_intention(self):
         hands = self.hands.copy().values
         objs = self.objects.values()
@@ -249,10 +179,16 @@ class Scene :
                 if hand.label=='right':
                     obj.is_targeted_by(hand)
 
+    def propagate_hands(self, timestamp = None):
+        hands = self.hands.copy().values()
+        for hand in hands:
+            hand.propagate2(timestamp = timestamp)
 
-    def new_hand(self, pred, timestamp = None):
-        self.hands[pred.label] = GraspingHand(hand_prediction = pred, timestamp = timestamp, compute_velocity_cone=self.show_velocity_cone)
-        self.new_hand_meshes.append({'mesh' : self.hands[pred.label].mesh_origin, 'name': pred.label})
+    def clean_hands(self, newhands):
+        hands_label = [hand.label for hand in newhands]
+        hands = self.hands.copy()
+        for label in hands:
+            self.hands[label].setvisible(label in hands_label)
 
     def update_hands(self, hands_predictions, timestamp = None):
         if timestamp is None:
@@ -267,17 +203,11 @@ class Scene :
         self.clean_hands(hands_predictions)
         self.propagate_hands( timestamp = timestamp)
         # self.evaluate_grasping_intention()
-    def propagate_hands(self, timestamp = None):
-        hands = self.hands.copy().values()
-        for hand in hands:
-            hand.propagate2(timestamp = timestamp)
     
-    def clean_hands(self, newhands):
-        hands_label = [hand.label for hand in newhands]
-        hands = self.hands.copy()
-        for label in hands:
-            self.hands[label].setvisible(label in hands_label)
     
+    def new_hand(self, pred, timestamp = None):
+        self.hands[pred.label] = GraspingHand(hand_prediction = pred, timestamp = timestamp, compute_velocity_cone=self.show_velocity_cone)
+        self.new_hand_meshes.append({'mesh' : self.hands[pred.label].mesh_origin, 'name': pred.label})
 
     def new_object(self, prediction, timestamp = None):
         label = prediction['label']
@@ -361,10 +291,10 @@ class Scene :
 
     def stop(self):
         #stop the callback thread
-        print('stopped pyglet app inside scene')
-        self.scene_window.on_close()
         print('stopping inside scene')
         pyglet.app.exit()
+        print('stopped pyglet app inside scene')
+        self.scene_window.on_close()
         print('stopped scene window inside scene')
         self.t_scene.join()
         print('joined scene thread inside scene')
@@ -376,17 +306,45 @@ class Scene :
         
         for hand in self.hands.values():
             data[hand.label + '_hand_traj'] = hand.get_trajectory()
-            print(f"get_{hand.label}_data: {data[hand.label + '_hand_traj']}")
+            print(f"get_{hand.label}_data: {data[hand.label + '_hand_traj']['Timestamps']}")
         return data
     
     def get_objects_data(self):
         data = {}
         for obj in self.objects.values():
             data[obj.label + '_obj_traj'] = obj.get_trajectory()
-            print(f"get_{obj.label}_data: {data[obj.label + '_obj_traj']}")
         return data
     
 
+class AnalysiScene(Scene):
+    _DEFAULT_VIDEO_RENDERING_OPTIONS=dict(write_fps = True, 
+                                    draw_hands=True, 
+                                    draw_objects=False, 
+                                    write_hands_pos = False, 
+                                    write_objects_pos = False,
+                                    render_objects=True)
+    
+    _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS = dict(is_displayed = True,
+                                                    draw_grid = True,
+                                                    show_velocity_cone = True)
+    
+    def __init__(self, cam_data, name='Grasping experiment',   video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS) -> None:
+        super().__init__(cam_data, name, video_rendering_options, scene_rendering_options)
+
+    def create_void_hands(self):
+        labels = ('left', 'right')
+        for label in labels:
+            self.hands[label] = GraspingHand(label=label, compute_velocity_cone=self.show_velocity_cone)
+            self.new_hand_meshes.append({'mesh' : self.hands[label].mesh_origin, 'name': label})
+
+    def load_hands(self, hands_predictions, timestamp = None):
+        for label, hand in self.hands.items():
+            if label in hands_predictions:
+                hand.minimal_update(hands_predictions[label])
+            else:
+                hand.minimal_update(None)
+        self.propagate_hands( timestamp = timestamp)
+        
 class LiveScene(Scene):
     _DEFAULT_VIDEO_RENDERING_OPTIONS=dict(write_fps = True, 
                                     draw_hands=True, 
@@ -433,7 +391,7 @@ class ReplayScene(Scene):
                                                     fps = 30)
     
     def __init__(self, cam_data, name='Grasping experiment',   video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS) -> None:
-        super().__init__(cam_data, name, video_rendering_options, scene_rendering_options, detect_grasping=False)
+        super().__init__(cam_data, name, video_rendering_options, scene_rendering_options)
     
     def render(self, img):  
         # self.compute_distances()
@@ -447,37 +405,6 @@ class ReplayScene(Scene):
         if self.rendering_options['write_fps']:
             self.write_fps(img)        
         return img
-
-
-class AnalysiScene(Scene):
-    _DEFAULT_VIDEO_RENDERING_OPTIONS=dict(write_fps = True, 
-                                    draw_hands=True, 
-                                    draw_objects=False, 
-                                    write_hands_pos = False, 
-                                    write_objects_pos = False,
-                                    render_objects=True)
-    
-    _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS = dict(is_displayed = True,
-                                                    draw_grid = True,
-                                                    show_velocity_cone = True)
-    
-    def __init__(self, cam_data, name='Grasping experiment',   video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS) -> None:
-        super().__init__(cam_data, name, video_rendering_options, scene_rendering_options)
-
-    def create_void_hands(self):
-        labels = ('left', 'right')
-        for label in labels:
-            self.hands[label] = GraspingHand(label=label, compute_velocity_cone=self.show_velocity_cone)
-            self.new_hand_meshes.append({'mesh' : self.hands[label].mesh_origin, 'name': label})
-
-    def load_hands(self, hands_predictions, timestamp = None):
-        for label, hand in self.hands.items():
-            if label in hands_predictions:
-                hand.minimal_update(hands_predictions[label])
-            else:
-                hand.minimal_update(None)
-        self.propagate_hands( timestamp = timestamp)
-        
 
 class Entity:
     
@@ -544,7 +471,6 @@ class Entity:
     
 class RigidObject(Entity):
     
-    MAIN_DATA_KEYS=RigidObjectTrajectory.DEFAULT_DATA_KEYS
     
     _TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad'
     _YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models'
@@ -720,7 +646,7 @@ class RigidObject(Entity):
 
     
 class GraspingHand(Entity):
-    MAIN_DATA_KEYS=GraspingHandTrajectory.DEFAULT_DATA_KEYS
+    
     
     def __init__(self, label = None, hand_prediction=None, timestamp=None , compute_velocity_cone = False)-> None:
         super().__init__()
@@ -871,8 +797,7 @@ class GraspingHand(Entity):
     
     def render(self, img):
         # Draw the hand landmarks.
-        # displayed_landmarks = self.state.landmarks
-        displayed_landmarks = self.detected_hand.get_landmarks()
+        displayed_landmarks = self.state.normalized_landmarks_filtered
         landmarks_proto = landmark_pb2.NormalizedLandmarkList()
         # landmarks_proto.landmark.extend([
         #                                     landmark_pb2.NormalizedLandmark(x=landmark[0], y=landmark[1], z=landmark[2]) for landmark in displayed_landmarks])

@@ -7,9 +7,11 @@ from i_grip import ObjectPoseEstimators as ope
 from i_grip import Scene as sc
 import cv2
 import numpy as np
+import os
 
 class ExperimentReplayer:
     def __init__(self, device_id, device_data, name = None, display_replay = True, resolution=(1280,720), fps=30.0) -> None:
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         self.device_id = device_id
         self.resolution = resolution
         self.fps = fps
@@ -36,6 +38,8 @@ class ExperimentReplayer:
     
 
     def replay(self, gh):
+        self.object_pose_estimator.reset()
+        self.scene.reset()
         print(self.__dict__)
         print('start')
         detect = True

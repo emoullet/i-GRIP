@@ -82,13 +82,14 @@ class Object2DDetector:
         # print('models loaded, not run yet : ')
         # os.system('nvidia-smi | grep python')
         if self.detecting:
-            self.p_full = threading.Thread(target=self.forward_pass_full_detector)
+            self.forward_pass_full_detector()
+            # self.p_full = threading.Thread(target=self.forward_pass_full_detector)
             # self.p_win = [threading.Thread(target=self.forward_pass_windows_detector)]
-            self.p_full.start()
+            # self.p_full.start()
             # for p in self.p_win:
             #     p.start()
             # print('bvwxjcksj,nb xcn,xk,')
-            self.p_full.join()
+            # self.p_full.join()
             # print('JSOKJNQSDKCJNSBZDKJNSBDJSN')
             # for p in self.p_win:
             #     p.join()

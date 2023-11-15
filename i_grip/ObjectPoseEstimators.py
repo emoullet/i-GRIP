@@ -46,35 +46,42 @@ class KnownObjectPoseEstimator:
                                                   object_refiner_run_id,
                                                   preload_cache=True,
                                                   n_workers=6 )
-        self.pose_predictions = None
-        self.pose_estimation_prior = None
         self.use_prior = use_tracking
         self.threshold_nb_iter = 20
 
         self.K = self.cameras.K.cuda().float()
         self.n_refiner_iterations = 1
-        self.emptyPrediction = KnownObjectPoseEstimator.emptyPrediction()
+        # self.emptyPrediction = KnownObjectPoseEstimator.emptyPrediction()
 
         self.scene_objects = dict()
-        self.it =0
         self.fuse_detections = fuse_detections
         if self.fuse_detections:
             self.predict = self.pose_predictor.get_predictions_fused
         else:
             self.predict = self.pose_predictor.get_predictions
-
+        self.reset()
+        
+    def reset(self):
+        self.pose_estimation_prior = None
+        self.pose_predictions = None
+        self.it = 0
+    
     def estimate(self, image, detections = None):
         if image is None:
             return {}
         # Predict poses using cosypose
         #print(detections)
-        print(f'pose_estimation_prior {self.pose_estimation_prior}')
+        # print(f'pose_estimation_prior {self.pose_estimation_prior}')
         # print(f'detections {detections.bboxes}')
         predict = self.pose_estimation_prior is not None or detections is not None
         if predict:
             # image = torch.as_tensor(np.stack([self.format_crop(image), ])).permute(0, 3, 1, 2).cuda().float() / 255
             img = torch.as_tensor(np.stack([image, ])).permute(0, 3, 1, 2).cuda().float() / 255
             cv2.imwrite('/home/emoullet/GitHub/i-GRIP/tset/img.png', image)
+            # save detections.bboxes as file
+            # np.savetxt('/home/emoullet/GitHub/i-GRIP/tset/detections.txt', detections.copy().cpu().bboxes)
+            # save K as file
+            # print(f'K {self.K}')
             if detections is not None and not self.fuse_detections:
             #if detections is not None:
                 self.pose_estimation_prior = None
@@ -93,7 +100,7 @@ class KnownObjectPoseEstimator:
                 n_coarse_iterations=n_coarse_iterations,
                 n_refiner_iterations=self.n_refiner_iterations,
                 detections=detections)
-            print(f'inps : {inps}')
+            # print(f'inps : {inps}')
             self.pose_predictions, _ = self.predict(
                 images=img, K=self.K,
                 data_TCO_init=self.pose_estimation_prior,
@@ -101,12 +108,12 @@ class KnownObjectPoseEstimator:
                 n_refiner_iterations=self.n_refiner_iterations,
                 detections=detections
             )
-            print('ITER')
-            print(self.pose_predictions.poses)
-            print(self.pose_predictions.poses_input)
-            print(self.pose_predictions.K_crop)
-            print(self.pose_predictions.boxes_rend)
-            print(self.pose_predictions.boxes_crop)
+            # print('ITER')
+            # print(self.pose_predictions.poses)
+            # print(self.pose_predictions.poses_input)
+            # print(self.pose_predictions.K_crop)
+            # print(self.pose_predictions.boxes_rend)
+            # print(self.pose_predictions.boxes_crop)
             # exit()
         else:
                 self.pose_predictions = None

@@ -4,12 +4,14 @@ import argparse
 from i_grip import HandDetectors2 as hd
 from i_grip import Object2DDetectors as o2d
 from i_grip import ObjectPoseEstimators as ope
-from i_grip import Scene as sc
+from i_grip import Scene2 as sc
 import cv2
 import numpy as np
+import os
 
 class ExperimentReplayer:
     def __init__(self, device_id, device_data, name = None, display_replay = True, resolution=(1280,720), fps=30.0) -> None:
+        os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         self.device_id = device_id
         self.resolution = resolution
         self.fps = fps
@@ -17,7 +19,7 @@ class ExperimentReplayer:
         dataset = "ycbv"        
         self.display_replay = display_replay
         
-        device_data = np.load('/home/emoullet/Documents/i-GRIP/DATA/Session_1/cam_19443010910F481300.npz')
+        # device_data = np.load('/home/emoullet/Documents/i-GRIP/DATA/Session_1/cam_19443010910F481300.npz')
         self.hand_detector = hd.HybridOAKMediapipeDetector(replay=True, cam_params= device_data, resolution=resolution, fps=fps)
         self.object_detector = o2d.get_object_detector(dataset,
                                                        device_data)
@@ -29,7 +31,7 @@ class ExperimentReplayer:
             self.name = f'ExperimentReplayer_{dataset}'
         else:
             self.name = name
-        self.scene = sc.LiveScene( device_data, name = f'{self.name}_scene')
+        self.scene = sc.ReplayScene( device_data, name = f'{self.name}_scene')
         # self.scene = sc.ReplayScene( device_data, name = f'{self.name}_scene')
         self.hand_detector.start()
     
@@ -39,7 +41,8 @@ class ExperimentReplayer:
     def replay(self, replay, name = None):
         
         self.hand_detector.load_replay(replay)
-        
+        self.object_pose_estimator.reset()
+        self.scene.reset()
         if name is not None:
             cv_window_name = f'{self.name} : Replaying {name}'
         else:
@@ -50,16 +53,13 @@ class ExperimentReplayer:
             success, img = self.hand_detector.next_frame()
             if not success:
                 continue
-            obj_path = './YCBV_test_pictures/cap2.png'
-            img = cv2.imread(obj_path)
             render_img = img.copy()
             to_process_img = img.copy()
             cv2.cvtColor(to_process_img, cv2.COLOR_RGB2BGR, to_process_img)
-            # to_process_img.flags.writeable = False
-
+            
             # Hand detection
-            # hands = self.hand_detector.get_hands(to_process_img)
-            #self.scene.update_hands(hands, timestamp)
+            hands = self.hand_detector.get_hands(to_process_img)
+            self.scene.update_hands(hands, timestamp)
 
             # Object detection
             if detect:
@@ -72,10 +72,7 @@ class ExperimentReplayer:
 
             # Object pose estimation
             self.objects_pose = self.object_pose_estimator.estimate(to_process_img, detections = self.object_detections)
-            self.scene.update_objects(self.objects_pose)
-            #img.flags.writeable = False
-            # img.flags.writeable = True
-            # cv2.cvtColor(img, cv2.COLOR_BGR2RGB, img)
+            self.scene.update_objects(self.objects_pose, timestamp)
             if self.display_replay:
                 self.scene.render(render_img)
                 cv2.imshow(cv_window_name, render_img)
@@ -84,7 +81,7 @@ class ExperimentReplayer:
                 print('end')
                 self.stop()
                 break
-
+        self.scene.pause_scene_display()
         hands_data = self.scene.get_hands_data()
         objects_data = self.scene.get_objects_data()
         

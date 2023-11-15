@@ -66,7 +66,10 @@ class Scene :
         self.draw_mesh = True
         self.new_hand_meshes = []
         self.new_object_meshes = []
+        self.hands_to_delete = []
+        self.objects_to_delete = []
         self.scene_callback_period = 1.0/fps
+        self.fps = fps
         
         if self.draw_mesh:
             self.define_mesh_scene()
@@ -79,6 +82,29 @@ class Scene :
         for obj in objs:
             s+=str(obj)+'\n'
         return s
+
+    def pause_scene_rendering(self):
+        self.run_scene_rendering = False
+    
+    def resume_scene_rendering(self):
+        self.run_scene_rendering = True
+
+    def reset(self):   
+        self.pause_scene_rendering()
+        self.hands_to_delete = self.hands.keys()
+        self.objects_to_delete = self.objects.keys()
+        self.hands = dict()
+        self.objects = dict()
+        self.time_scene = time.time()
+        self.time_hands = self.time_scene
+        self.time_objects = self.time_hands
+        self.fps_scene = 0
+        self.fps_hands= 0
+        self.fps_objects= 0
+        self.new_hand_meshes = []
+        self.new_object_meshes = []
+        self.scene_callback_period = 1.0/self.fps
+        self.resume_scene_rendering()
     
     def display_meshes(self):
         print('Starting mesh display thread')
@@ -87,6 +113,11 @@ class Scene :
         print('Mesh display thread closed')
 
     def update_hands_meshes(self, scene):
+        for label in self.hands_to_delete:
+            scene.delete_geometry(label)
+            print(f'delete hand {label}')
+        self.hands_to_delete = []
+        
         for i in range(len(self.new_hand_meshes)):
             new = self.new_hand_meshes.pop(0)
             scene.add_geometry(new['mesh'], geom_name = new['name'])
@@ -126,13 +157,17 @@ class Scene :
 
 
     def update_object_meshes(self, scene):
+        for label in self.objects_to_delete:
+            scene.delete_geometry(label)
+            print(f'delete object {label}')
+        self.objects_to_delete = []
         for i in range(len(self.new_object_meshes)):
             new = self.new_object_meshes.pop(0)
             scene.add_geometry(new['mesh'], geom_name = new['name'])
             # self.objects_collider.add_object(new['name'], new['mesh'])            
-            print('add here')
-            print(scene.geometry)
-            print('add there')
+            # print('add here')
+            # print(scene.geometry)
+            # print('add there')
 
         objs = self.objects.copy().items()
         for label, obj in objs:
@@ -408,7 +443,7 @@ class ReplayScene(Scene):
 
 class Entity:
     
-    MAIN_DATA_KEYS = [ 'x', 'y', 'z']
+    # MAIN_DATA_KEYS = [ 'x', 'y', 'z']
     
     def __init__(self) -> None:
         self.visible = True

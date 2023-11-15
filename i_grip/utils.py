@@ -7,7 +7,7 @@ import cv2
 import subprocess
 import pandas as pd
 import os
-from i_grip.HandDetectors import HandPrediction
+from i_grip.HandDetectors2 import HandPrediction
 from i_grip.Filters import LandmarksSmoothingFilter
 
 class Position:
@@ -224,15 +224,15 @@ class RigidObjectState:
         return repr_list
         
 class GraspingHandState:
-    def __init__(self,  position=None, landmarks=None, timestamp = None) -> None:
+    def __init__(self,  position=None, normalized_landmarks=None,  timestamp = None) -> None:
         self.position = Position(position)
-        self.landmarks = landmarks
+        self.normalized_landmarks = normalized_landmarks
         # if landmarks is None:
         #     self.landmarks = np.zeros((21,3))
         # else:
         #     self.landmarks = landmarks
         self.new_position = self.position
-        self.new_landmarks = self.landmarks
+        self.new_normalized_landmarks = self.normalized_landmarks
         
         self.velocity = np.array([0,0,0])
         self.scalar_velocity = 0
@@ -241,12 +241,13 @@ class GraspingHandState:
         self.velocity_filtered = self.velocity
         self.filter_position, self.filter_velocity = Filter.both('xyz')
         
-        if landmarks is not None:
-            self.landmarks_velocity = np.zeros((21,3))
-            self.landmarks_filtered = self.landmarks
-            self.landmarks_velocity_filtered = self.landmarks_velocity
+        if normalized_landmarks is not None:
+            self.normalized_landmarks_velocity = np.zeros((21,3))
+            self.normalized_landmarks_filtered = self.normalized_landmarks
+            self.normalized_landmarks_velocity_filtered = self.normalized_landmarks_velocity            
+            self.filter_normalized_landmarks, self.filter_normalized_landmarks_velocity= Filter.both('normalized_landmarks')
             
-            self.filter_landmarks, self.filter_landmarks_velocity= Filter.both('landmarks')
+            
         if timestamp is None:
             self.last_timestamp = time.time()
         else:
@@ -256,33 +257,32 @@ class GraspingHandState:
         
     @classmethod
     def from_hand_detection(cls, hand_detection: HandPrediction, timestamp = 0):
-        return cls(hand_detection.position, hand_detection.landmarks, timestamp)
+        return cls(hand_detection.position, hand_detection.normalized_landmarks, timestamp)
 
     def update_position(self, position):
         self.new_position = Position(position)
         
-    def update_landmarks(self, landmarks):
-        self.new_landmarks = landmarks
+    def update_normalized_landmarks(self, normalized_landmarks):
+        self.new_normalized_landmarks = normalized_landmarks
     
     def update(self, new_input):
         if isinstance(new_input, HandPrediction):
             self.update_position(new_input.position)
-            self.update_landmarks(new_input.landmarks)
+            self.update_normalized_landmarks(new_input.normalized_landmarks)
         elif isinstance(new_input, Position):
             self.update_position(new_input)
         elif new_input is None:
-            self.update_landmarks(new_input)
+            self.update_normalized_landmarks(new_input)
         else:
             print(f'weird input : {new_input}')
-        print(f'updated with {type(new_input)} : {new_input}')
         self.was_updated = True
         
     def propagate(self, timestamp):
         
         elapsed = timestamp - self.last_timestamp
         self.propagate_position(elapsed)
-        if self.landmarks is not None:
-            self.propagate_landmarks(elapsed)
+        if self.normalized_landmarks is not None:
+            self.propagate_normalized_landmarks(elapsed)
         self.last_timestamp = timestamp
         self.was_updated = False
         
@@ -308,40 +308,42 @@ class GraspingHandState:
                 self.normed_velocity = np.array([0,0,0])
                 
             self.position = next_position
-    
-    def propagate_landmarks(self, elapsed):
+        
+    def propagate_normalized_landmarks(self, elapsed):
         if not  self.was_updated:
-            next_landmarks = self.landmarks 
+            # next_normalized_landmarks = self.normalized_landmarks + elapsed*self.normalized_landmarks_velocity
+            next_normalized_landmarks = self.normalized_landmarks
+            self.normalized_landmarks_velocity = self.normalized_landmarks_velocity
         else:
-            next_landmarks = self.new_landmarks
-            self.landmarks_filtered = self.filter_landmarks.apply(next_landmarks)
+            next_normalized_landmarks = self.new_normalized_landmarks
             if elapsed >0:
-                self.landmarks_velocity = (self.new_landmarks - self.landmarks)/elapsed
+                self.normalized_landmarks_velocity = (self.new_normalized_landmarks - self.normalized_landmarks)/elapsed
             
-            self.landmarks_velocity_filtered = self.filter_landmarks_velocity.apply(self.landmarks_velocity)
+        self.normalized_landmarks_filtered = self.filter_normalized_landmarks.apply(next_normalized_landmarks)
+        self.normalized_landmarks_velocity_filtered = self.filter_normalized_landmarks_velocity.apply(self.normalized_landmarks_velocity)
             
-        self.landmarks = next_landmarks
+        self.normalized_landmarks = next_normalized_landmarks
     
-    def as_list(self, timestamp=True, position=False, landmarks=False, velocity=False, landmarks_velocity=False, filtered_position=False, filtered_velocity=False, filtered_landmarks=False, filtered_landmarks_velocity=False, normalized_velocity=False, scalar_velocity=False):
+    def as_list(self, timestamp=True, position=False, normalized_landmarks=False, velocity=False, normalized_landmarks_velocity=False, filtered_position=False, filtered_velocity=False, filtered_normalized_landmarks=False, filtered_normalized_landmarks_velocity=False, normalized_velocity=False, scalar_velocity=False):
         repr_list = []
         if timestamp:
             repr_list.append(self.last_timestamp)
         if position:
             repr_list += self.position.as_list()
-        if landmarks:
-            repr_list += self.landmarks.flatten().tolist()
+        if normalized_landmarks:
+            repr_list += self.normalized_landmarks.flatten().tolist()
         if velocity:
             repr_list += self.velocity.tolist()
-        if landmarks_velocity:
-            repr_list += self.landmarks_velocity.flatten().tolist()
+        if normalized_landmarks_velocity:
+            repr_list += self.normalized_landmarks_velocity.flatten().tolist()
         if filtered_position:
             repr_list += self.position_filtered.as_list()
         if filtered_velocity:
             repr_list += self.velocity_filtered.tolist()
-        if filtered_landmarks:
-            repr_list += self.landmarks_filtered.flatten().tolist()
-        if filtered_landmarks_velocity:
-            repr_list += self.landmarks_velocity_filtered.flatten().tolist()
+        if filtered_normalized_landmarks:
+            repr_list += self.normalized_landmarks_filtered.flatten().tolist()
+        if filtered_normalized_landmarks_velocity:
+            repr_list += self.normalized_landmarks_velocity_filtered.flatten().tolist()
         if normalized_velocity:
             repr_list += self.normed_velocity.tolist()
         if scalar_velocity:
@@ -432,15 +434,15 @@ class Filter(LandmarksSmoothingFilter):
     
     
     def __init__(self, key, type='natural') -> None:
-        min_cutoffs = {'landmarks' : 0.001, 'world_landmarks' : 0.001, 'xyz': 1}
-        betas = {'landmarks' : 0.5, 'world_landmarks' : 0.5, 'xyz': 0.5}
-        derivate_cutoff = {'landmarks' : 1, 'world_landmarks' : 1, 'xyz': 0.00000001}
+        min_cutoffs = {'landmarks' : 0.001, 'world_landmarks' : 0.001, 'xyz': 1, 'normalized_landmarks' : 0.15} 
+        betas = {'landmarks' : 0.5, 'world_landmarks' : 0.5, 'xyz': 0.5, 'normalized_landmarks' : 50}
+        derivate_cutoff = {'landmarks' : 1, 'world_landmarks' : 1, 'xyz': 0.00000001, 'normalized_landmarks' : 10}
 
-        derivative_min_cutoffs = {'landmarks' : 0.001, 'world_landmarks' : 0.001, 'xyz': 0.1}
-        derivative_betas = {'landmarks' : 1.5, 'world_landmarks' : 0.5, 'xyz': 0.08}
-        derivative_derivate_cutoff = {'landmarks' : 1, 'world_landmarks' : 1, 'xyz': 0.1}
+        derivative_min_cutoffs = {'landmarks' : 0.001, 'world_landmarks' : 0.001, 'xyz': 0.1, 'normalized_landmarks' : 0.001}
+        derivative_betas = {'landmarks' : 1.5, 'world_landmarks' : 0.5, 'xyz': 0.08, 'normalized_landmarks' : 0.5}
+        derivative_derivate_cutoff = {'landmarks' : 1, 'world_landmarks' : 1, 'xyz': 0.1, 'normalized_landmarks' : 1}
 
-        refinable_keys = ['landmarks', 'world_landmarks', 'xyz']
+        refinable_keys = ['landmarks', 'world_landmarks', 'xyz', 'normalized_landmarks']
         types = ['natural', 'derivative']
         if key not in refinable_keys:
             raise ValueError('key must be in '+str(refinable_keys))
