@@ -1373,7 +1373,8 @@ class Trial:
             hand_summary = pd.DataFrame()
             hand_summary['Timestamps'] = hand_data['Timestamps']
             for key in hand_keys:
-                hand_summary[hand_id + '_' + key] = hand_data[key]
+                if key != 'Timestamps':
+                    hand_summary[hand_id + '_' + key] = hand_data[key]
             # add the hand_summary to the main_data starting at the row corresponding to the first timestamp
             self.main_data = pd.merge(self.main_data, hand_summary, on='Timestamps', how='left')
         
@@ -1382,7 +1383,8 @@ class Trial:
             object_summary = pd.DataFrame()
             object_summary['Timestamps'] = object_data['Timestamps']
             for key in object_keys:
-                object_summary[object_id + '_' + key] = object_data[key]
+                if key != 'Timestamps':
+                    object_summary[object_id + '_' + key] = object_data[key]
             print(f'object_summary: \n{object_summary}')
             print(f'object_keys: \n{object_keys}')
             # add the object_summary to the main_data starting at the row corresponding to the first timestamp
@@ -1401,10 +1403,13 @@ class Trial:
     def save_replay_data(self, device_id):
         #write hands_data and objects_data to csv files
         for hand_id, hand_data in self.hands_data.items():
-            hand_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_{hand_id}.csv"))
+            hand_data = hand_data.drop_duplicates(subset=['Timestamps'])
+            hand_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_{hand_id}.csv"), index=False)
         for object_id, object_data in self.objects_data.items():
-            object_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_{object_id}.csv"))
-        self.main_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_main.csv"))
+            object_data = object_data.drop_duplicates(subset=['Timestamps'])
+            object_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_{object_id}.csv"),index=False)
+        main_data = self.main_data.drop_duplicates(subset=['Timestamps'])
+        main_data.to_csv(os.path.join(self.replay_path, f"{self.label}_cam_{device_id}_main.csv"), index=False)
     
     def read_replay_data(self, device_id):
         # list all files from the trial folder, files only, that end with hand_traj.csv

@@ -24,16 +24,37 @@ class ExperimentAnalyser:
     def get_device_id(self):
         return self.device_id
     
-    def analyse(self, trajectory:pd, name = None):
+    def analyse(self, hands_label, obj_labels, all_trajectories:pd, name = None):
         
         self.scene.reset()
         if name is not None:
             cv_window_name = f'{self.name} : Replaying {name}'
         else:
             cv_window_name = f'{self.name} : Replaying'
-        
-        for row in trajectory.iterrows():
-            hands_data
+        hand_c = ['x', 'y', 'z']
+        obj_c = ['x', 'y', 'z', 'qx', 'qy', 'qz', 'qw']
+        hands = {}
+        for hand_label in hands_label:
+            df = pd.DataFrame(columns = ['Timestamps']+hand_c)
+            df['Timestamps'] = all_trajectories['Timestamps']
+            for c in hand_c:
+                df[c] = all_trajectories[hand_label+'_'+c]
+            hands[hand_label] = df
+        objects = {}
+        for obj_label in obj_labels:
+            df = pd.DataFrame(columns = ['Timestamps']+obj_c)
+            df['Timestamps'] = all_trajectories['Timestamps']
+            for c in obj_c:
+                df[c] = all_trajectories[obj_label+'_'+c]
+            objects[obj_label] = df
+        for hand_lab, traj in hands.items():
+            self.scene.new_hand(hand_lab, traj)
+        for obj_lab, traj in objects.items():
+            self.scene.new_object(obj_lab, traj)
+        for i in range(len(all_trajectories)):
+            self.scene.update()
+            self.scene.draw(cv_window_name)
+            cv2.waitKey(1)
         return hands_data, objects_data
         
     def stop(self):

@@ -498,7 +498,6 @@ class ExperimentRecordingInterface(ExperimentInterface):
         self.experiment.selected_session.start()
         
         
-
 class ExperimentProcessingInterface(ExperimentInterface):
     def __init__(self, mode = 'Processing'):
         super().__init__(mode = mode)
@@ -821,66 +820,22 @@ class ExperimentReplayInterface(ExperimentProcessingInterface):
         #         pseudo_checkbutton.config(state="disabled", style="danger.Outline.Toolbutton")
         # self.valid_participants = self.participants.loc[self.participants['Pre-processable']==True]
                    
-        
-    # def select_not_processed_participants(self):
-    #     #get the state of the checkbutton
-    #     select_not_pre_processed = self.select_non_pre_processed_participants_checkbutton.instate(['selected'])
-    #     if select_not_pre_processed:
-    #         new_state = ['selected']
-    #     else:
-    #         new_state = ['!selected']
-    #     print(f"Select not pre-processed: {select_not_pre_processed}")
-        
-    #     pre_processed_participants = self.valid_participants.loc[~(self.valid_participants['Pre-processed']==True)]
-    #     self.set_participants_state(pre_processed_participants, new_state)
-            
-    #     already_checked = self.select_all_participants_checkbutton.instate(['selected'])
-    #     deselect_alls = already_checked and not select_not_pre_processed        
-        
-    #     if deselect_alls:
-    #         self.select_all_participants_checkbutton.state(['!selected'])
-            
-    # def select_processed_participants(self):
-    #     #get the state of the checkbutton
-    #     select_pre_processed =  self.select_pre_processed_participants_checkbutton.instate(['selected'])
-    #     if select_pre_processed:
-    #         new_state = ['selected']
-    #     else:
-    #         new_state = ['!selected']
-        
-    #     pre_processed_participants = self.valid_participants.loc[self.valid_participants['Pre-processed']]
-    #     self.set_participants_state(pre_processed_participants, new_state)
-            
-    #     already_checked = self.select_all_participants_checkbutton.instate(['selected'])
-    #     deselect_alls = already_checked and not select_pre_processed        
-    #     if deselect_alls:
-    #         self.select_all_participants_checkbutton.state(['!selected'])
-        
-    # def select_participant(self, pseudo):
-    #     # if not self.all_participants_checkbuttons[pseudo].instate(['selected']):
-    #     self.experiment.select_participant(pseudo)
-    #     # count the number of selected participants in the section.participants_database and enable the button if at least one participant is selected
-    #     participants = self.experiment.get_session_participants()
-    #     print(participants)
-    #     print(participants.loc[participants[self.to_process_label]==True])
-    #     nb_selected_participants = len(participants.loc[participants[self.to_process_label]==True])
-    #     print(nb_selected_participants)
-    #     if nb_selected_participants>0:
-    #         self.pre_process_participants_button.config(state="normal")
-    #     else:
-    #         self.pre_process_participants_button.config(state="disabled")
-            
-    # def process_selected_participants(self):        
-    #     self.pre_process_participants_button.config(state="disabled")
-    #     self.experiment.pre_process_selected_participants()
-    #     self.experiment.refresh_session()
-    #     self.build_participants_layout()
-    #     self.load_participants()
+        rticipants()
         
 
 class ExperimentAnalysisInterface(ExperimentInterface):
     def __init__(self):
         super().__init__(mode="Analysis")
+        self.pseudo_button_default_state = ['!alternate']
+        print("Building analysis interface")
+        self.ready_to_process_labels = ['Partially replayed', 'Replayed']
+        self.already_processed_label = 'Analysed'
+        self.partially_processed_label = 'Partially analysed'
+        
+        self.trial_label_processed = ' replayed'
+        self.process_labels = {'Name' : 'Analysis',
+                               'Processabe': self.ready_to_process_labels,
+                               'Already processed': self.already_processed_label}
 
 
             

@@ -11,6 +11,7 @@ import pyfqmr
 import pyglet
 
 from i_grip.utils2 import *
+from i_grip import HandDetectors2 as hd
 import pandas as pd
 from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
@@ -151,7 +152,105 @@ class Scene :
     def resume_scene_display(self):
         print('resume scene display')
         self.run_scene_display = True
+       
+    def check_all_targets(self, scene):
+        targets = {}
+        hands = self.hands.copy()
+        objs = self.objects.copy()
+        for hlabel, hand in hands.items(): 
+            for olabel, obj in objs.items():
+                if olabel in scene.geometry:
+                    mesh = scene.geometry[olabel]
+                    mesh_frame_locations = hand.check_target(obj, mesh)
+                    scene.delete_geometry(hand.label+obj.label+'ray_impacts')
+                    if len(mesh_frame_locations)>0:
+                        impacts = tm.points.PointCloud(mesh_frame_locations, colors=hand.color)
+                        # scene.add_geometry(impacts, geom_name=hand.label+'ray_impacts')
+                        scene.add_geometry(impacts, geom_name=hand.label+obj.label+'ray_impacts',transform = obj.get_mesh_transform())
+                else:
+                    print('Mesh '+olabel+' has not been loaded yet')
+            targets[hlabel]= hand.fetch_targets()
+            
+        for olabel in objs:
+            target_info = (False, None, None)
+            for hlabel in hands:
+                if olabel in targets[hlabel]:
+                    target_info=(True, self.hands[hlabel], targets[hlabel][olabel])
+                self.objects[olabel].set_target_info(target_info)
+
+
+    def evaluate_grasping_intention(self):
+        hands = self.hands.copy().values
+        objs = self.objects.values()
+        for obj in objs():
+            for hand in hands:
+                if hand.label=='right':
+                    obj.is_targeted_by(hand)
+
+    def next_timestamp(self):
+        for hand in self.hands.values():
+            hand.next_timestamp()
+        for obj in self.objects.values():
+            obj.next_timestamp()
+
+    def new_hand(self, label, input= None, timestamp = None):
+        self.hands[label] = GraspingHand(label=label, hand_prediction = input, timestamp = timestamp, compute_velocity_cone=self.show_velocity_cone)
+        self.new_hand_meshes.append({'mesh' : self.hands[input.label].mesh_origin, 'name': input.label})
+    
+
+    def update_hands(self, hands_predictions, timestamp = None):
+        if timestamp is None:
+            timestamp = time.time()
+        self.update_hands_time(timestamp = timestamp)
+        hands = self.hands.copy()
+        for hand_pred in hands_predictions:
+            if hand_pred.label not in hands:
+                self.new_hand(hand_pred.label, input=hand_pred, timestamp = timestamp)
+            else : 
+                self.hands[hand_pred.label].update2(hand_pred)
+        self.clean_hands(hands_predictions)
+        self.propagate_hands( timestamp = timestamp)
+        # self.evaluate_grasping_intention()
         
+    def propagate_hands(self, timestamp = None):
+        hands = self.hands.copy().values()
+        for hand in hands:
+            hand.propagate2(timestamp = timestamp)
+    
+    def clean_hands(self, newhands):
+        hands_label = [hand.label for hand in newhands]
+        hands = self.hands.copy()
+        for label in hands:
+            self.hands[label].setvisible(label in hands_label)
+    
+
+    def new_object(self, label, input = None, timestamp = None):
+        self.objects[label] = RigidObject.from_prediction(input, timestamp)
+        self.new_object_meshes.append({'mesh' : self.objects[label].mesh, 'name': label})
+        
+    def update_objects(self, objects_predictions:dict, timestamp = None):
+        if timestamp is None:
+            timestamp = time.time()
+        self.update_objects_time()
+        objs = self.objects.copy()
+        for label, prediction in objects_predictions.items():
+            if label in objs:
+                self.objects[label].update(prediction, timestamp = timestamp)
+            else:                    
+                self.new_object(label, input=prediction, timestamp = timestamp)
+        self.clean_objects()
+    
+    def clean_objects(self):
+        todel=[]
+        objs = self.objects.copy()
+        for label in objs.keys():
+            if self.objects[label].nb_updates <=0:
+                todel.append(label)
+            self.objects[label].nb_updates-=1
+        for key in todel:
+            del self.objects[key]
+            print('object '+key+' forgotten')
+     
     def update_meshes(self, scene):
         if self.run_scene_display:
             self.update_hands_meshes(scene)
@@ -215,86 +314,6 @@ class Scene :
             obj.update_mesh()
             scene.graph.update(label, matrix=obj.get_mesh_transform(), geometry = label)
 
-    def check_all_targets(self, scene):
-        targets = {}
-        hands = self.hands.copy()
-        objs = self.objects.copy()
-        for hlabel, hand in hands.items(): 
-            for olabel, obj in objs.items():
-                if olabel in scene.geometry:
-                    mesh = scene.geometry[olabel]
-                    mesh_frame_locations = hand.check_target(obj, mesh)
-                    scene.delete_geometry(hand.label+obj.label+'ray_impacts')
-                    if len(mesh_frame_locations)>0:
-                        impacts = tm.points.PointCloud(mesh_frame_locations, colors=hand.color)
-                        # scene.add_geometry(impacts, geom_name=hand.label+'ray_impacts')
-                        scene.add_geometry(impacts, geom_name=hand.label+obj.label+'ray_impacts',transform = obj.get_mesh_transform())
-                else:
-                    print('Mesh '+olabel+' has not been loaded yet')
-            targets[hlabel]= hand.fetch_targets()
-            
-        for olabel in objs:
-            target_info = (False, None, None)
-            for hlabel in hands:
-                if olabel in targets[hlabel]:
-                    target_info=(True, self.hands[hlabel], targets[hlabel][olabel])
-                self.objects[olabel].set_target_info(target_info)
-
-
-    def evaluate_grasping_intention(self):
-        hands = self.hands.copy().values
-        objs = self.objects.values()
-        for obj in objs():
-            for hand in hands:
-                if hand.label=='right':
-                    obj.is_targeted_by(hand)
-
-
-    def new_hand(self, pred, timestamp = None):
-        self.hands[pred.label] = GraspingHand(hand_prediction = pred, timestamp = timestamp, compute_velocity_cone=self.show_velocity_cone)
-        self.new_hand_meshes.append({'mesh' : self.hands[pred.label].mesh_origin, 'name': pred.label})
-
-    def update_hands(self, hands_predictions, timestamp = None):
-        if timestamp is None:
-            timestamp = time.time()
-        self.update_hands_time(timestamp = timestamp)
-        hands = self.hands.copy()
-        for hand_pred in hands_predictions:
-            if hand_pred.label not in hands:
-                self.new_hand(hand_pred, timestamp = timestamp)
-            else : 
-                self.hands[hand_pred.label].update2(hand_pred)
-        self.clean_hands(hands_predictions)
-        self.propagate_hands( timestamp = timestamp)
-        # self.evaluate_grasping_intention()
-    def propagate_hands(self, timestamp = None):
-        hands = self.hands.copy().values()
-        for hand in hands:
-            hand.propagate2(timestamp = timestamp)
-    
-    def clean_hands(self, newhands):
-        hands_label = [hand.label for hand in newhands]
-        hands = self.hands.copy()
-        for label in hands:
-            self.hands[label].setvisible(label in hands_label)
-    
-
-    def new_object(self, prediction, timestamp = None):
-        label = prediction['label']
-        self.objects[label] = RigidObject.from_prediction(prediction, timestamp)
-        self.new_object_meshes.append({'mesh' : self.objects[label].mesh, 'name': label})
-        
-    def update_objects(self, objects_predictions:dict, timestamp = None):
-        if timestamp is None:
-            timestamp = time.time()
-        self.update_objects_time()
-        objs = self.objects.copy()
-        for label, prediction in objects_predictions.items():
-            if label in objs:
-                self.objects[label].update(prediction, timestamp = timestamp)
-            else:                    
-                self.new_object(prediction, timestamp = timestamp)
-        self.clean_objects()
 
     def update_hands_time(self, timestamp = None):
         if timestamp is None:
@@ -335,16 +354,6 @@ class Scene :
         self.fps_detections = 1 /self.elapsed_detections
         self.time_detections = now
 
-    def clean_objects(self):
-        todel=[]
-        objs = self.objects.copy()
-        for label in objs.keys():
-            if self.objects[label].nb_updates <=0:
-                todel.append(label)
-            self.objects[label].nb_updates-=1
-        for key in todel:
-            del self.objects[key]
-            print('object '+key+' forgotten')
 
     def compute_distances(self):
         hands = self.hands.copy().values()
@@ -375,14 +384,14 @@ class Scene :
         # loop over hands
         
         for hand in self.hands.values():
-            data[hand.label + '_hand_traj'] = hand.get_trajectory()
+            data[hand.label + '_hand'] = hand.get_trajectory()
             print(f"get_{hand.label}_data: {data[hand.label + '_hand_traj']}")
         return data
     
     def get_objects_data(self):
         data = {}
         for obj in self.objects.values():
-            data[obj.label + '_obj_traj'] = obj.get_trajectory()
+            data[obj.label] = obj.get_trajectory()
             print(f"get_{obj.label}_data: {data[obj.label + '_obj_traj']}")
         return data
     
@@ -551,7 +560,7 @@ class RigidObject(Entity):
     _TLESS_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/tless.cad/'
     _YCVB_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/ycbv/'
     
-    def __init__(self, dataset = 'tless',  label = None, pose=None, score = None, render_box=None, timestamp = None) -> None:
+    def __init__(self, dataset = 'tless',  label = None, pose=None, score = None, render_box=None, timestamp = None, trajectory = None) -> None:
         super().__init__()
         if(dataset == "ycbv"):
             self.mesh_path = RigidObject._YCVB_MESH_PATH
@@ -570,6 +579,7 @@ class RigidObject(Entity):
         else:
             self.state = RigidObjectState.from_prediction(pose, timestamp)
         self.trajectory = RigidObjectTrajectory.from_state(self.state)
+        #TODO : add traj to init
         self.score = score
         if render_box is None:
             self.render_box = None
@@ -598,7 +608,10 @@ class RigidObject(Entity):
     @classmethod
     def from_prediction(cls, prediction, timestamp):
         return cls(dataset=prediction['dataset'], label = prediction['label'], pose = prediction['pose'], score = prediction['score'], render_box = prediction['render_box'], timestamp = timestamp)
-
+    @classmethod
+    def from_trajectory(cls, label, trajectory):
+        return cls(label = label, trajectory)
+    
     def __str__(self):
         out = 'label: ' + str(self.label) + '\n pose: {' +str(self.pose)+'} \n nb_updates: '+str(self.nb_updates)
         return out
@@ -619,7 +632,7 @@ class RigidObject(Entity):
         timestamp = row['Timestamps']
         xyz = row[['x', 'y', 'z']].values
         orient = row[['qx', 'qy', 'qz', 'qw']].values
-        self.pose = Pose.fr
+        self.state.update_from_vector_and_quat(xyz, orient, timestamp = timestamp)
         
     def load_mesh(self):
         try :
@@ -648,10 +661,10 @@ class RigidObject(Entity):
         exit()
 
     def update_mesh(self):
-        self.mesh_pos = self.state.pose.position_filtered.v*np.array([-1,1,1])
+        self.mesh_pos = self.state.pose_filtered.position.v*np.array([-1,1,1])
         # mesh_orient_quat = [self.pose.orientation.q[i] for i in range(4)]
         # mesh_orient_angles = self.pose.orientation.v*np.array([-1,-1,-1])+np.pi*np.array([1  ,1,0])
-        mesh_orient_angles = self.state.pose.orientation_filtered.v*np.array([1,1,1])+np.pi*np.array([0 ,0,1])
+        mesh_orient_angles = self.state.pose_filtered.orientation.v*np.array([1,1,1])+np.pi*np.array([0 ,0,1])
         # x_reflection_matrix = tm.transformations.reflection_matrix(np.array([0,0,0]), np.array([1,0,0]))
         #mesh_transform = tm.transformations.translation_matrix(mesh_pos)  @ tm.transformations.quaternion_matrix(mesh_orient_quat)
         rot_mat = tm.transformations.euler_matrix(mesh_orient_angles[0],mesh_orient_angles[1],mesh_orient_angles[2])
@@ -722,24 +735,31 @@ class RigidObject(Entity):
 class GraspingHand(Entity):
     MAIN_DATA_KEYS=GraspingHandTrajectory.DEFAULT_DATA_KEYS
     
-    def __init__(self, label = None, hand_prediction=None, timestamp=None , compute_velocity_cone = False)-> None:
+    def __init__(self, label = None, hand_prediction=None, timestamp=None, trajectory = None, compute_velocity_cone = False)-> None:
         super().__init__()
         self.label = label
-        self.detected_hand = hand_prediction
-        if hand_prediction is not None:            
-            self.state = GraspingHandState.from_hand_detection(hand_prediction, timestamp = timestamp)
-            if self.label is None:
-                self.label = hand_prediction.label
-        else:   
-            self.state = None
+        if trajectory is None:
+            self.detected_hand = hand_prediction
+            if isinstance(hand_prediction, hd.HandDetectors.HandPrediction):
+                self.state = GraspingHandState.from_hand_detection(hand_prediction, timestamp = timestamp)
+                if self.label is None:
+                    self.label = hand_prediction.label
+            elif isinstance(hand_prediction, np.ndarray):
+                self.state = GraspingHandState.from_position(hand_prediction, timestamp = timestamp)
+            else:   
+                self.state = None
+            
+            # define trajectory as a pandas dataframe with columns : time, x, y, z, vx, vy, vz, v
+            self.trajectory = GraspingHandTrajectory.from_state(self.state)
+        elif isinstance(trajectory, pd.DataFrame):
+            self.trajectory = GraspingHandTrajectory.from_dataframe(trajectory)
+            self.state = GraspingHandState.from_position(self.trajectory.next_position())
         
         self.new= True
         self.visible = True
         self.invisible_time = 0
         self.max_invisible_time = 0.3
  
-        # define trajectory as a pandas dataframe with columns : time, x, y, z, vx, vy, vz, v
-        self.trajectory = GraspingHandTrajectory.from_state(self.state)
         # self.update_trajectory(timestamp)
         self.compute_velocity_cone = compute_velocity_cone
         self.show_label = True
@@ -758,6 +778,10 @@ class GraspingHand(Entity):
         
         self.target_detector = TargetDetector(self.label)
 
+    @classmethod
+    def from_trajectory(cls, trajectory):
+        return cls(trajectory = trajectory)
+    
     def build_from_hand_prediction(self, hand_prediction):
         self.__dict__= hand_prediction.__dict__
         if isinstance(hand_prediction, i_grip.HandDetectors.HandPrediction):

@@ -143,9 +143,9 @@ class Pose:
         
     def update_from_mat_filtered(self, mat):
         self.mat = mat
-        self.position = Position(self.filters['position'].apply(self.mat[:3,3])*self.position_factor*np.array([1,-1,1]))
+        self.position = Position(self.filter_position.apply(self.mat[:3,3])*self.position_factor*np.array([1,-1,1]))
         mat = self.mat[:3,:3]
-        self.orientation = Orientation(self.filters['orientation'].apply(mat)*self.orientation_factor)
+        self.orientation = Orientation(self.filter_orientation.apply(mat)*self.orientation_factor)
     
     def update_from_vector_and_quat(self, translation_vector, quaternion):
         mat = R.from_quat(quaternion).as_matrix()
@@ -153,11 +153,11 @@ class Pose:
         self.update_from_mat(mat)
         
     def __str__(self):
-        out = 'position : ' + str(self.position_filtered) + ' -- orientation : ' + str(self.orientation_filtered)
+        out = 'position : ' + str(self.position) + ' -- orientation : ' + str(self.orientation)
         return out
     
     def as_list(self):
-        return self.position_filtered.as_list()+self.orientation_filtered.as_list()
+        return self.position.as_list()+self.orientation.as_list()
     
 class Bbox:
 
@@ -214,7 +214,12 @@ class RigidObjectState:
             self.pose.update(pose)
             self.pose_filtered.update(pose)
         self.timestamp = timestamp
-        
+    
+    def update_from_vector_and_quat(self, translation_vector, quaternion, timestamp=None):
+        self.pose.update_from_vector_and_quat(translation_vector, quaternion)
+        self.pose_filtered.update_from_vector_and_quat(translation_vector, quaternion)
+        self.timestamp = timestamp
+    
     def propagate(self, timestamp):
         self.timestamp = timestamp
         #TODO: propagate pose for tracking moving objects
@@ -264,6 +269,10 @@ class GraspingHandState:
     @classmethod
     def from_hand_detection(cls, hand_detection: HandPrediction, timestamp = 0):
         return cls(hand_detection.position, hand_detection.normalized_landmarks, timestamp)
+    
+    @classmethod
+    def from_position(cls, position: Position, timestamp = 0):
+        return cls(position, timestamp=timestamp)
 
     def update_position(self, position):
         self.new_position = Position(position)
@@ -358,7 +367,7 @@ class GraspingHandState:
 
 class Trajectory():
     DATA_KEYS = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'v']
-    def __init__(self, state = None, headers_list=None, attributes_dict=None, file = None) -> None:
+    def __init__(self, state = None, headers_list=None, attributes_dict=None, file = None, df =None) -> None:
         if file is not None:
             #check if file exists and is a csv file
             if not os.path.isfile(file):
@@ -395,11 +404,14 @@ class GraspingHandTrajectory(Trajectory):
     def from_state(cls, state):
         return cls(state)
     
+    def from_dataframe(self, df):
+        return Trajectory(df=df)
+    
     def next_position(self):
         if self.current_line_index < len(self.data):
             row = self.data.iloc[self.current_line_index]
             self.current_line_index+=1
-            return Position(np.array([row['x'], row['y'], row['z']]), display='cm', swap_y=True)
+            return Position(np.array([row['x'], row['y'], row['z']]), display='cm', swap_y=True), row['Timestamps']
         
 
 class RigidObjectTrajectory(Trajectory):
@@ -448,7 +460,7 @@ class Filter(LandmarksSmoothingFilter):
         derivative_betas = {'landmarks' : 1.5, 'world_landmarks' : 0.5, 'position': 0.08, 'normalized_landmarks' : 0.5, 'orientation' : 0.5}
         derivative_derivate_cutoff = {'landmarks' : 1, 'world_landmarks' : 1, 'position': 0.1, 'normalized_landmarks' : 1, 'orientation' : 1}
 
-        refinable_keys = ['landmarks', 'world_landmarks', 'position', 'normalized_landmarks']
+        refinable_keys = ['landmarks', 'world_landmarks', 'position', 'normalized_landmarks', 'orientation']
         types = ['natural', 'derivative']
         if key not in refinable_keys:
             raise ValueError('key must be in '+str(refinable_keys))
