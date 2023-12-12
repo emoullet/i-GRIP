@@ -65,11 +65,12 @@ class HybridOAKMediapipeDetector():
             self.get_hands = self.get_hands_video
             self.landmarker_options = HandLandmarkerOptions(
                 base_options=BaseOptions(model_asset_path=mediapipe_model_path),
-                running_mode=VisionRunningMode.IMAGE,
-                # running_mode=VisionRunningMode.VIDEO,
+                # running_mode=VisionRunningMode.IMAGE,
+                running_mode=VisionRunningMode.VIDEO,
                 num_hands=2,
-                # min_hand_detection_confidence = 0.8,
-                # min_hand_presence_confidence = 0.8
+                min_hand_presence_confidence = 0.4,
+                min_hand_detection_confidence = 0.4,
+                min_tracking_confidence = 0.4,
                 )
             self.isOn = self.isOn_replay
             self.cam_data = cam_params
@@ -82,8 +83,9 @@ class HybridOAKMediapipeDetector():
                 base_options=BaseOptions(model_asset_path=mediapipe_model_path),
                 running_mode=VisionRunningMode.LIVE_STREAM,
                 num_hands=2,
-                # min_hand_detection_confidence = 0.8,
-                # min_hand_presence_confidence = 0.8,
+                min_hand_presence_confidence = 0.4,
+                min_hand_detection_confidence = 0.4,
+                min_tracking_confidence = 0.4,
                 result_callback=self.extract_hands)
 
         self.frame = None
@@ -328,8 +330,8 @@ class HybridOAKMediapipeDetector():
             # mp_frame=self.frame
             frame_timestamp_ms = round(self.timestamp*1000)
             mp_image = mp.Image(image_format=self.format, data=mp_frame)
-            # landmark_results = self.landmarker.detect_for_video(mp_image, frame_timestamp_ms)
-            landmark_results = self.landmarker.detect(mp_image)
+            landmark_results = self.landmarker.detect_for_video(mp_image, frame_timestamp_ms)
+            # landmark_results = self.landmarker.detect(mp_image)
             self.extract_hands(landmark_results, mp_image, frame_timestamp_ms)
             self.new_frame = False
         return self.hands_predictions
@@ -361,11 +363,13 @@ class HandPrediction:
         self.normalized_world_landmarks = world_landmarks
         # self.world_landmarks = np.array([[l.x*img_res[0], l.y*img_res[1], l.z] for l in world_landmarks])
         self.label = handedness[0].category_name.lower()
-        self.position, self.roi = stereo_inference.calc_spatials(self.depth_point(), depth_map)
+        self.position, self.roi = stereo_inference.calc_spatials(self.hand_point(), depth_map)
         # self.position = self.position/1000
         
-    def depth_point(self):
-        return self.normalized_landmarks[0,:]
+    def hand_point(self):
+        hand_point = self.normalized_landmarks[0,:] # wrist
+        hand_point = (self.normalized_landmarks[0,:]+self.normalized_landmarks[5,:]+self.normalized_landmarks[17,:])/3 # wrist, index finger and pinky baricenter
+        return hand_point
 
     def get_landmarks(self):
         return self.normalized_landmarks

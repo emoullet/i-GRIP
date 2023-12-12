@@ -46,12 +46,12 @@ class ExperimentPreProcessor:
         self.combination_respected = tk.BooleanVar()
         self.combination_respected.set(True)
         self.bcombination_respected = False
-        self.combination_respected_button = ttk.Checkbutton(check_buttons_frame, text="Combination respected", variable=self.combination_respected)
+        self.combination_respected_button = ttk.Checkbutton(check_buttons_frame, text="Combination respected", variable=self.combination_respected, command=self.set_combination_respected)
         self.combination_respected_button.grid(row=0, column=0,padx=10, pady=10)
         
         self.face_visible = tk.BooleanVar()
         self.bface_visible = False
-        self.face_visible_button = ttk.Checkbutton(check_buttons_frame, text="Face visible", variable=self.face_visible)
+        self.face_visible_button = ttk.Checkbutton(check_buttons_frame, text="Face visible", variable=self.face_visible, command=self.set_face_visible)
         self.face_visible_button.grid(row=0, column=1, padx=10, pady=10)
         
         
@@ -139,8 +139,6 @@ class ExperimentPreProcessor:
         self.current_trial_index += 1
         self.next_button.config(state='disabled')
         #dezactivate check buttons
-        self.combination_respected.set(True)
-        self.face_visible.set(False)
         self.processing_window.update()
     
     def set_new_participant(self, participant_name, nb_trials):
@@ -149,6 +147,10 @@ class ExperimentPreProcessor:
         self.current_trial_index = 0
     
     def process_trial(self, folder_path = None, combination = None, destination_folder = None):
+        self.combination_respected.set(True)
+        self.bcombination_respected = True
+        self.face_visible.set(False)
+        self.bface_visible = False
         self.destination_folder = destination_folder
         folder = folder_path.split('/')[-1]
         
@@ -176,7 +178,7 @@ class ExperimentPreProcessor:
         print(f"depthmap_paths : {self.depthmap_paths}")
         print(f"timestamps_paths : {self.timestamps_paths}")
         self.pre_process(recording_paths)
-        return self.combination_respected.get(), not self.face_visible.get(), self.durations
+        return self.bcombination_respected, not self.bface_visible, self.durations
 
     def get_duration(self):        
         self.start = int(self.start_var.get())
@@ -189,9 +191,9 @@ class ExperimentPreProcessor:
         self.durations['movement'] = self.timestamps['Timestamps'].iloc[self.end] - self.timestamps['Timestamps'].iloc[self.start]
         self.durations['contact'] = self.timestamps['Timestamps'].iloc[self.return_mov_start] - self.timestamps['Timestamps'].iloc[self.end]
         self.durations['return'] = self.timestamps['Timestamps'].iloc[-1] - self.timestamps['Timestamps'].iloc[self.return_mov_start]
-        
-        cut_timestamps = self.timestamps.iloc[self.start:self.end]
-        cut_timestamps['Timestamps'] = cut_timestamps['Timestamps'] - cut_timestamps['Timestamps'].iloc[0]
+        self.durations['total'] = self.timestamps['Timestamps'].iloc[-1] - self.timestamps['Timestamps'].iloc[0]
+        # cut_timestamps = self.timestamps.iloc[self.start:self.end]
+        # cut_timestamps.loc[:, 'Timestamps'] = cut_timestamps['Timestamps'] - cut_timestamps['Timestamps'].iloc[0]
         dur =''
         i = 0
         for d, t in self.durations.items(): 
@@ -224,7 +226,7 @@ class ExperimentPreProcessor:
         
         self.start_var.set(0)        
         self.end_var.set(int(self.nb_frames/2))
-        self.return_mov_start_var.set(self.nb_frames-1)
+        self.return_mov_start_var.set(int(self.nb_frames*3/4))
         self.get_duration()
         self.current_frame_index = 0
         for vid in self.videos:
@@ -233,7 +235,7 @@ class ExperimentPreProcessor:
                 exit()
         
         self.onChangeEnd(int(self.nb_frames/2))
-        self.onChangeReturnMovStart(self.nb_frames-1)
+        self.onChangeReturnMovStart(int(self.nb_frames*3/4))
         self.onChangeStart(0)
         
         self.stay=True
@@ -286,10 +288,11 @@ class ExperimentPreProcessor:
         print("begin video saving")
         for id, v_path in enumerate(video_paths):
             reader = cv2.VideoCapture(v_path)
-            if brotate:
-                res = (resolution[1], resolution[0])
-            else:
-                res = resolution
+            # if brotate:
+            #     res = (resolution[1], resolution[0])
+            # else:
+            #     res = resolution
+            res = resolution
             stand_recorder = cv2.VideoWriter(stand_video_paths[id], fourcc, fps, res)
             movement_recorder = cv2.VideoWriter(mov_video_paths[id], fourcc, fps, res)
             contact_recorder = cv2.VideoWriter(contact_video_paths[id], fourcc, fps, res)
@@ -297,8 +300,8 @@ class ExperimentPreProcessor:
             frame_index = 0
             while reader.isOpened():
                 err,img = reader.read()
-                if brotate:
-                    img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+                # if brotate:
+                #     img = cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
                 if frame_index<start:
                     stand_recorder.write(img)                
                 elif frame_index >= start and frame_index <= end:
@@ -320,42 +323,55 @@ class ExperimentPreProcessor:
         for id, d_path in enumerate(depthmap_paths):
             df = pd.read_pickle(d_path, compression='gzip')
             
-            df_stand = df[:start]
-            df_stand['Timestamps'] = df_stand['Timestamps'] - df_stand['Timestamps'].iloc[0]
-            df_stand.to_pickle(stand_depthmap_paths[id], compression='gzip')
+            if start >0:
+                df_stand = df[:start]
+                df_stand.loc[:, 'Timestamps'] = df_stand['Timestamps'] - df_stand['Timestamps'].iloc[0]
+                df_stand.to_pickle(stand_depthmap_paths[id], compression='gzip')
+            else:
+                df_stand = pd.DataFrame(columns=df.columns)
             
             df_mov = df[start:end]
-            df_mov['Timestamps'] = df_mov['Timestamps'] - df_mov['Timestamps'].iloc[0]
+            df_mov.loc[:, 'Timestamps'] = df_mov['Timestamps'] - df_mov['Timestamps'].iloc[0]
             df_mov.to_pickle(mov_depthmap_paths[id], compression='gzip')
             
             df_con = df[end:return_mov_start]
-            df_con['Timestamps'] = df_con['Timestamps'] - df_con['Timestamps'].iloc[0]
+            df_con.loc[:, 'Timestamps'] = df_con['Timestamps'] - df_con['Timestamps'].iloc[0]
             df_con.to_pickle(contact_depthmap_paths[id], compression='gzip')
             
-            df_ret = df[return_mov_start:]
-            df_ret['Timestamps'] = df_ret['Timestamps'] - df_ret['Timestamps'].iloc[0]
-            df_ret.to_pickle(ret_depthmap_paths[id], compression='gzip')
+            if return_mov_start < nb_frames-1:
+                df_ret = df[return_mov_start:]
+                df_ret.loc[:, 'Timestamps'] = df_ret['Timestamps'] - df_ret['Timestamps'].iloc[0]
+                df_ret.to_pickle(ret_depthmap_paths[id], compression='gzip')
+            else:
+                df_ret = pd.DataFrame(columns=df.columns)
             
             print(f'depthmap {id} saved')
         print("begin timestamps saving")
         for id, t_path in enumerate(timestamps_paths):
             df = pd.read_pickle(t_path, compression='gzip')
             
-            df_stand = df[:start]
-            df_stand['Timestamps'] = df_stand['Timestamps'] - df_stand['Timestamps'].iloc[0]
-            df_stand.to_pickle(stand_timestamps_paths[id], compression='gzip')
+            if start >0:
+                df_stand = df[:start]
+                df_stand.loc[:, 'Timestamps'] = df_stand['Timestamps'] - df_stand['Timestamps'].iloc[0]
+                df_stand.to_pickle(stand_timestamps_paths[id], compression='gzip')
+            else:
+                df_stand = pd.DataFrame(columns=df.columns)
             
             df_mov = df[start:end]
-            df_mov['Timestamps'] = df_mov['Timestamps'] - df_mov['Timestamps'].iloc[0]
+            df_mov.loc[:, 'Timestamps'] = df_mov['Timestamps'] - df_mov['Timestamps'].iloc[0]
             df_mov.to_pickle(mov_timestamps_paths[id], compression='gzip')
             
             df_con = df[end:return_mov_start]
-            df_con['Timestamps'] = df_con['Timestamps'] - df_con['Timestamps'].iloc[0]
+            df_con.loc[:, 'Timestamps'] = df_con['Timestamps'] - df_con['Timestamps'].iloc[0]
             df_con.to_pickle(contact_timestamps_paths[id], compression='gzip')
             
-            df_ret = df[return_mov_start:]
-            df_ret['Timestamps'] = df_ret['Timestamps'] - df_ret['Timestamps'].iloc[0]
-            df_ret.to_pickle(ret_timestamps_paths[id], compression='gzip')
+            if return_mov_start < nb_frames-1:
+                df_ret = df[return_mov_start:]
+                df_ret.loc[:, 'Timestamps'] = df_ret['Timestamps'] - df_ret['Timestamps'].iloc[0]
+                df_ret.to_pickle(ret_timestamps_paths[id], compression='gzip')
+            else:
+                
+                df_ret = pd.DataFrame(columns=df.columns)
             
             print(f'timestamps {id} saved')
             movement_time = df_mov['Timestamps'].iloc[-1] - df_mov['Timestamps'].iloc[0]
@@ -400,7 +416,15 @@ class ExperimentPreProcessor:
         self.brotate = not self.brotate
         print(f'rotate : {self.brotate}')
         self.to_display(self.saved_imgs)
-        
+    
+    def set_face_visible(self):
+        self.bface_visible = not self.bface_visible
+        print(f'face visible : {self.bface_visible}')
+    
+    def set_combination_respected(self):
+        self.bcombination_respected = not self.bcombination_respected
+        print(f'combination respected : {self.bcombination_respected}')
+                
     def to_display(self, imgs, index = None):
         nimgs=[]
         for img in imgs:
@@ -408,7 +432,6 @@ class ExperimentPreProcessor:
                 return
             # nimg = cv2.resize(img, (self.w, self.h), interpolation=cv2.INTER_AREA)
             nimg = img
-            print(f"nimg.shape : {nimg.shape}")
             if self.brotate:
                 nimg = cv2.rotate(nimg, cv2.ROTATE_90_CLOCKWISE)
             nimgs.append(nimg)
@@ -424,7 +447,7 @@ class ExperimentPreProcessor:
             self.go_on = False
         
     def onChangeStart(self, trackbarValue):
-        # print(f'onChangeStart, trackbarval : {trackbarValue}')
+        print(f'onChangeStart, trackbarval : {trackbarValue}')
         st = float(trackbarValue)
         et = self.end_var.get()
         rt = self.return_mov_start_trackbar.get()
@@ -443,8 +466,9 @@ class ExperimentPreProcessor:
             err,img = vid.read()
             imgs.append(img)
         self.to_display(imgs, ind)
-        
+        print(f'start_var bef : {self.start_var.get()}')
         self.start_var.set(ind)
+        print(f'start_var aft: {self.start_var.get()}')
         if ind>=100:
             space=''
         elif ind>=10:
@@ -531,6 +555,7 @@ class ExperimentPreProcessor:
         self.processing_window.mainloop()
     
     def stop(self):
+        cv2.destroyAllWindows()
         self.stay = False
         for th in self.save_threads:
             th.join()

@@ -113,48 +113,103 @@ class Orientation:
         return self.q.tolist()
     
 class Pose:
-    def __init__(self, tensor_or_mat, position_factor=1, orientation_factor=1, filtered=False) -> None:
+    def __init__(self, pose_tensor_or_mat, position_factor=1, orientation_factor=1, filtered=False , flip_pos_y = False) -> None:
         self.filtered = filtered
         self.position_factor = position_factor
         self.orientation_factor = orientation_factor
+        self.flip_pos_y = flip_pos_y
         if filtered:
             self.filter_position, self.filter_velocity = Filter.both('position')
             self.filter_orientation, self.filter_angular_velocity = Filter.both('orientation')
         self.update_from_mat = self.update_from_mat_filtered if filtered else self.update_from_mat_raw
-        self.update(tensor_or_mat)
+        
+        if hasattr(pose_tensor_or_mat, 'cpu'):
+            pose_tensor_or_mat = pose_tensor_or_mat.cpu().numpy()
+            
+        if isinstance(pose_tensor_or_mat, Pose):
+            self.mat = pose_tensor_or_mat.mat
+            self.position = pose_tensor_or_mat.position
+            self.orientation = pose_tensor_or_mat.orientation
+            # self.filtered = pose_tensor_or_mat.filtered
+            # self.position_factor = pose_tensor_or_mat.position_factor
+            # self.orientation_factor = pose_tensor_or_mat.orientation_factor
+            # self.filter_position = pose_tensor_or_mat.filter_position
+            # self.filter_velocity = pose_tensor_or_mat.filter_velocity
+            # self.filter_orientation = pose_tensor_or_mat.filter_orientation
+            # self.filter_angular_velocity = pose_tensor_or_mat.filter_angular_velocity
+            # self.update_from_mat = pose_tensor_or_mat.update_from_mat
+        elif pose_tensor_or_mat is None:
+            self.mat = np.zeros((4,4))
+            self.mat[3,3] = 1
+            self.position = Position(np.zeros(3))
+            self.orientation = Orientation(np.zeros(3))
+            self.update(pose_tensor_or_mat, flip_pos_y=self.flip_pos_y)
+        elif isinstance(pose_tensor_or_mat, np.ndarray):
+            if pose_tensor_or_mat.shape != (4,4):
+                raise ValueError('Pose must be initialized with a 4x4 matrix')
+            self.update_from_mat(pose_tensor_or_mat,flip_pos_y=self.flip_pos_y)
+        else:
+            raise TypeError('Pose must be initialized with a 4x4 matrix or a Pose object')
     
     @classmethod
-    def from_vector_and_quat(cls, translation_vector, quaternion, position_factor=1, orientation_factor=1):
-        mat = R.from_quat(quaternion).as_matrix()
+    def from_vector_and_quat(cls, translation_vector, quaternion, position_factor=1, orientation_factor=1, filtered=False, flip_pos_y = False):
+        print('translation_vector', translation_vector)
+        print('quaternion', quaternion)
+        mat = np.zeros((4,4))
+        mat[3,3] = 1
+        mat[:3,:3] = R.from_quat(quaternion).as_matrix()
         mat[:3,3] = translation_vector
-        return cls(mat, position_factor, orientation_factor)
+        return cls(mat, position_factor, orientation_factor, filtered, flip_pos_y)
 
-    def update(self, tensor_or_mat = None, translation_vector =  None, quaternion = None):
+    def update(self, tensor_or_mat = None, translation_vector =  None, quaternion = None, flip_pos_y = False):
         # check if tensor is a torch tensor
-        if hasattr(tensor_or_mat, 'cpu'):
+        if tensor_or_mat is None:
+            if translation_vector is not None and quaternion is not None:
+                self.update_from_vector_and_quat(translation_vector, quaternion, flip_pos_y = flip_pos_y)
+            else:
+                raise ValueError('Pose must be updated with a 4x4 matrix, a Pose object or a translation vector and a quaternion')
+        elif isinstance(tensor_or_mat, Pose):
+            self.update_from_mat(tensor_or_mat.mat, flip_pos_y = flip_pos_y)
+        elif hasattr(tensor_or_mat, 'cpu'):
             tensor_or_mat = tensor_or_mat.cpu().numpy()
-        self.update_from_mat(tensor_or_mat)
+            self.update_from_mat(tensor_or_mat, flip_pos_y = flip_pos_y)
+        else:
+            raise TypeError('Pose must be updated with a 4x4 matrix, a Pose object or a translation vector and a quaternion')
     
-    def update_from_mat_raw(self, mat):
+    def update_from_mat_raw(self, mat, flip_pos_y = False):
         self.mat = mat
-        self.position = Position(self.mat[:3,3]*self.position_factor*np.array([1,-1,1]))
-        mat = self.mat[:3,:3]
-        self.orientation = Orientation(mat*self.orientation_factor)
+        if flip_pos_y:
+            self.position = Position(self.mat[:3,3]*self.position_factor*np.array([1,-1,1]))
+        else:
+            self.position = Position(self.mat[:3,3]*self.position_factor)
+        rot_mat = self.mat[:3,:3]
+        self.orientation = Orientation(rot_mat*self.orientation_factor)
         
-    def update_from_mat_filtered(self, mat):
+    def update_from_mat_filtered(self, mat, flip_pos_y = False):
         self.mat = mat
-        self.position = Position(self.filter_position.apply(self.mat[:3,3])*self.position_factor*np.array([1,-1,1]))
-        mat = self.mat[:3,:3]
-        self.orientation = Orientation(self.filter_orientation.apply(mat)*self.orientation_factor)
+        if flip_pos_y:
+            self.position = Position(self.filter_position.apply(self.mat[:3,3])*self.position_factor*np.array([1,-1,1]))
+        else:
+            self.position = Position(self.filter_position.apply(self.mat[:3,3])*self.position_factor)
+        rot_mat = self.mat[:3,:3]
+        self.orientation = Orientation(self.filter_orientation.apply(rot_mat)*self.orientation_factor)
     
-    def update_from_vector_and_quat(self, translation_vector, quaternion):
-        mat = R.from_quat(quaternion).as_matrix()
-        mat[:3,3] = translation_vector
+    def update_from_vector_and_quat(self, translation_vector, quaternion, flip_pos_y = False):
+        mat = np.zeros((4,4))
+        mat[3,3] = 1
+        mat[:3,:3] = R.from_quat(quaternion).as_matrix()
+        if flip_pos_y:
+            mat[:3,3] = translation_vector*np.array([1,-1,1])
+        else:
+            mat[:3,3] = translation_vector
         self.update_from_mat(mat)
         
     def __str__(self):
         out = 'position : ' + str(self.position) + ' -- orientation : ' + str(self.orientation)
         return out
+    
+    def __repr__(self) -> str:
+        return self.__str__()
     
     def as_list(self):
         return self.position.as_list()+self.orientation.as_list()
@@ -190,34 +245,52 @@ class Bbox:
     def update_display(self, color, thickness):
         self.color = color
         self.thickness = thickness
-
-class RigidObjectState:
-    def __init__(self, pose = None, timestamp=None, position_factor=1, orientation_factor=1) -> None:
+        
+class State:
+    def __init__(self) -> None:
+        self.updated = False
+        self.propagated = False
+        self.timestamp = None
+        
+    def set_updated(self, updated):
+        self.updated = updated
+        
+    def was_updated(self):
+        return self.updated
+    
+    def set_propagated(self, propagated):
+        self.propagated = propagated
+    
+    def was_propagated(self):
+        return self.propagated
+    
+    
+class RigidObjectState(State):
+    def __init__(self, pose = None, timestamp=None, position_factor=1, flip_pos_y = False, orientation_factor=1) -> None:
+        super().__init__()
         self.position_factor = position_factor
         self.orientation_factor = orientation_factor
+        self.flip_pos_y = flip_pos_y
         if pose is None or timestamp is None:
             self.pose = None
             self.timestamp = None
         else:
-            self.pose = Pose(pose, position_factor, orientation_factor)
-            self.pose_filtered = Pose(pose, position_factor, orientation_factor, filtered=True)
+            self.pose = Pose(pose, position_factor, orientation_factor, flip_pos_y=flip_pos_y)
+            self.pose_filtered = Pose(pose, position_factor, orientation_factor, filtered=True, flip_pos_y=flip_pos_y)
             self.timestamp = timestamp
     
     @classmethod
-    def from_prediction(cls, prediction, timestamp, position_factor=1000):
-        return cls(prediction, timestamp, position_factor)
+    def from_pose(cls, pose, timestamp, position_factor=1, flip_pos_y = False, orientation_factor=1):
+        return cls(pose, timestamp, position_factor, flip_pos_y, orientation_factor)
     
     def update(self, pose, timestamp=None):
-        if isinstance(pose, Pose): 
-            self.pose = pose
-        else:
-            self.pose.update(pose)
-            self.pose_filtered.update(pose)
+        self.pose.update(pose, flip_pos_y=self.flip_pos_y)
+        self.pose_filtered.update(pose, flip_pos_y=self.flip_pos_y)
         self.timestamp = timestamp
     
     def update_from_vector_and_quat(self, translation_vector, quaternion, timestamp=None):
-        self.pose.update_from_vector_and_quat(translation_vector, quaternion)
-        self.pose_filtered.update_from_vector_and_quat(translation_vector, quaternion)
+        self.pose.update_from_vector_and_quat(translation_vector, quaternion, flip_pos_y=self.flip_pos_y)
+        self.pose_filtered.update_from_vector_and_quat(translation_vector, quaternion, flip_pos_y=self.flip_pos_y)
         self.timestamp = timestamp
     
     def propagate(self, timestamp):
@@ -234,8 +307,9 @@ class RigidObjectState:
             repr_list += self.pose_filtered.as_list()
         return repr_list
         
-class GraspingHandState:
+class GraspingHandState(State):
     def __init__(self,  position=None, normalized_landmarks=None,  timestamp = None) -> None:
+        super().__init__()
         self.position_raw = Position(position)
         self.normalized_landmarks = normalized_landmarks
         # if landmarks is None:
@@ -263,7 +337,6 @@ class GraspingHandState:
             self.last_timestamp = time.time()
         else:
             self.last_timestamp = timestamp
-        self.was_updated = False
         self.scalar_velocity_threshold = 20 #mm/s
         
     @classmethod
@@ -290,19 +363,21 @@ class GraspingHandState:
             self.update_normalized_landmarks(new_input)
         else:
             print(f'weird input : {new_input}')
-        self.was_updated = True
+        self.set_updated(True)
+        self.set_propagated(False)
         
-    def propagate(self, timestamp):
+    def propagate(self, timestamp, previous_states = None):
         
         elapsed = timestamp - self.last_timestamp
         self.propagate_position(elapsed)
         if self.normalized_landmarks is not None:
             self.propagate_normalized_landmarks(elapsed)
         self.last_timestamp = timestamp
-        self.was_updated = False
+        self.set_updated(False)
+        self.set_propagated(True)
         
     def propagate_position(self, elapsed):
-        if not  self.was_updated:
+        if not  self.was_updated():
             next_position = self.position_raw
         else:
             next_position = self.new_position
@@ -325,7 +400,7 @@ class GraspingHandState:
             self.position_raw = next_position
         
     def propagate_normalized_landmarks(self, elapsed):
-        if not  self.was_updated:
+        if not  self.was_updated():
             # next_normalized_landmarks = self.normalized_landmarks + elapsed*self.normalized_landmarks_velocity
             next_normalized_landmarks = self.normalized_landmarks
             self.normalized_landmarks_velocity = self.normalized_landmarks_velocity
@@ -338,6 +413,19 @@ class GraspingHandState:
         self.normalized_landmarks_velocity_filtered = self.filter_normalized_landmarks_velocity.apply(self.normalized_landmarks_velocity)
             
         self.normalized_landmarks = next_normalized_landmarks
+    
+    
+    def get_movement_direction(self):
+        point_down_factor = -0.3
+        vdir = self.normed_velocity + np.array([0,point_down_factor,0])
+        if np.linalg.norm(vdir) != 0:
+            vdir = vdir / np.linalg.norm(vdir)
+        return vdir
+
+    # def get_movement_direction_two_third_law(self):
+        
+    def get_timestamp(self):
+        return self.last_timestamp
     
     def as_list(self, timestamp=True, position=False, normalized_landmarks=False, velocity=False, normalized_landmarks_velocity=False, filtered_position=False, filtered_velocity=False, filtered_normalized_landmarks=False, filtered_normalized_landmarks_velocity=False, normalized_velocity=False, scalar_velocity=False):
         repr_list = []
@@ -366,9 +454,14 @@ class GraspingHandState:
         return repr_list
 
 class Trajectory():
+    
     DATA_KEYS = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'v']
-    def __init__(self, state = None, headers_list=None, attributes_dict=None, file = None, df =None) -> None:
-        if file is not None:
+    
+    def __init__(self, state = None, headers_list=DATA_KEYS, attributes_dict=None, file = None, dataframe =None) -> None:
+        self.attributes_dict = attributes_dict
+        if dataframe is not None:
+            self.data = dataframe                
+        elif file is not None:
             #check if file exists and is a csv file
             if not os.path.isfile(file):
                 raise ValueError(f'File {file} does not exist')
@@ -378,62 +471,105 @@ class Trajectory():
                 self.data = pd.read_csv(file)
         else:       
             self.data = pd.DataFrame(columns=headers_list)
-            self.attributes_dict = attributes_dict
             self.add(state)
         self.current_state = None
         self.current_line_index = 0
-    
-    def add(self, new_data):
-        if new_data is not None:
-            self.data.loc[len(self.data)] = new_data.as_list(**self.attributes_dict)
-            
-    def get_data(self):
-        return self.data
-    
-class GraspingHandTrajectory(Trajectory):
-    DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z']
-    DEFAULT_ATTRIBUTES  = dict(timestamp=True, filtered_position=True)
-    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None) -> None:
-        super().__init__(state, headers_list, attributes_dict, file)
+        self.states = []
         
     @classmethod
+    def from_dataframe(cls, df:pd.DataFrame):
+        return cls(dataframe=df)
+    
+    @classmethod
     def from_file(cls, file):
-        return Trajectory(file=file)
+        return cls(file=file)
     
     @classmethod
     def from_state(cls, state):
-        return cls(state)
+        return cls(state = state)
     
-    def from_dataframe(self, df):
-        return Trajectory(df=df)
+    def add(self, new_state:State):
+        if new_state is not None:
+            self.data.loc[len(self.data)] = new_state.as_list(**self.attributes_dict)
+            self.states.append(new_state)
+            
+    def get_data(self):
+        return self.data
+
+    def __iter__(self):
+        self.current_line_index = 0
+        return self
     
-    def next_position(self):
+    def __next__(self):
         if self.current_line_index < len(self.data):
             row = self.data.iloc[self.current_line_index]
             self.current_line_index+=1
-            return Position(np.array([row['x'], row['y'], row['z']]), display='cm', swap_y=True), row['Timestamps']
+            return row
+        else:
+            raise StopIteration
+    
+    def find_plane(self, nb_points):
+        # find regression plane for the last nb_points of the trajectory
+        if len(self.data) < nb_points:
+            raise ValueError('Not enough data points to find a plane')
+        else:
+            last_points = self.data.iloc[-nb_points:]
+            x = last_points['x']
+            y = last_points['y']
+            z = last_points['z']
+            A = np.array([x,y,np.ones(len(x))]).T
+            B = z
+            a,b,c = np.linalg.lstsq(A,B,rcond=None)[0]
+            return a,b,c
         
+    
+class GraspingHandTrajectory(Trajectory):
+    
+    DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z']
+    DEFAULT_ATTRIBUTES  = dict(timestamp=True, filtered_position=True)
+    
+    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None, dataframe=None) -> None:
+        super().__init__(state, headers_list, attributes_dict, file, dataframe)
+    
+    def __next__(self):
+        if self.current_line_index < len(self.data):
+            row = self.data.iloc[self.current_line_index]
+            # print(f'data : {self.data}')
+            # print('row', row)
+            self.current_line_index+=1
+            return Position(np.array([row['x'], row['y'], row['z']]), display='cm', swap_y=True), row['Timestamps']
+        else:
+            raise StopIteration
+        
+    def __getitem__(self, index):
+        if index < len(self.data):
+            row = self.data.iloc[index]
+            return Position(np.array([row['x'], row['y'], row['z']]), display='cm', swap_y=True), row['Timestamps']
+        else:
+            raise IndexError('Index out of range')
 
 class RigidObjectTrajectory(Trajectory):
     
     DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z', 'qx', 'qy', 'qz', 'qw']
     DEFAULT_ATTRIBUTES  = dict(timestamp=True, pose=True)
-    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None) -> None:
-        super().__init__(state, headers_list, attributes_dict, file)
-        
-    @classmethod
-    def from_file(cls, file):
-        return Trajectory(file=file)
     
-    @classmethod
-    def from_state(cls, state):
-        return cls(state)
+    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None, dataframe = None) -> None:
+        super().__init__(state, headers_list, attributes_dict, file, dataframe)
 
-    def next_pose(self):
+    def __next__(self):
         if self.current_line_index < len(self.data):
             row = self.data.iloc[self.current_line_index]
             self.current_line_index+=1
-            return Pose.from_vector_and_quat(np.array([row['x'], row['y'], row['z']]), np.array([row['qx'], row['qy'], row['qz'], row['qw']]))
+            return Pose.from_vector_and_quat(np.array([row['x'], row['y'], row['z']]), np.array([row['qx'], row['qy'], row['qz'], row['qw']])), row['Timestamps']
+        else:
+            raise ValueError('No more data in trajectory')
+    
+    def __getitem__(self, index):
+        if index < len(self.data):
+            row = self.data.iloc[index]
+            return Pose.from_vector_and_quat(np.array([row['x'], row['y'], row['z']]), np.array([row['qx'], row['qy'], row['qz'], row['qw']])), row['Timestamps']
+        else:
+            raise IndexError('Index out of range')
     
 class DataWindow:
     def __init__(self, size:int) -> None:
@@ -533,7 +669,6 @@ class TargetDetector:
     
     def new_impacts(self, obj, impacts, relative_hand_pos, elapsed):
         label = obj.label
-        obj_pose = obj.mesh_transform
         relative_hand_pos = Position(relative_hand_pos)
         #print('impacts', impacts)
         if label in self.potential_targets:
@@ -584,7 +719,6 @@ class Target:
         self.projected_collison_window = HandConeImpactsWindow(window_size)
         print(f'POTENTIAL TARGET {self.label}')
         self.ratio=0
-        self.last_update_time = time.time()
         self.distance_derivative = 0
         self.projected_collison_window.queue(impacts)
         self.predicted_impact_zone = Position(self.projected_collison_window.mean())
@@ -592,29 +726,27 @@ class Target:
         self.time_before_impact = 0
         self.grip = 'None'
         # self.derived_filter = LandmarksSmoothingFilter(min_cutoff=derivative_min_cutoff, beta=derivative_beta, derivate_cutoff=derivative_derivate_cutoff, disable_value_scaling=True)
-        self.relative_hand_vel = np.array([0,0,0])
         self.relative_hand_pos = relative_hand_pos
+        self.find_grip()
+        self.elapsed = 0
 
-    def update(self, impacts, new_relative_hand_pos,elapsed):        
-        self.relative_hand_vel = (new_relative_hand_pos.v - self.relative_hand_pos.v)/elapsed
-        self.relative_hand_pos = new_relative_hand_pos
+    def update(self, impacts, new_relative_hand_pos, elapsed):        
+        if elapsed != 0:
+            self.elapsed = elapsed
+            # self.relative_hand_vel = (new_relative_hand_pos.v - self.relative_hand_pos.v)/elapsed
+            self.relative_hand_pos = new_relative_hand_pos
         self.projected_collison_window.queue(impacts)
         self.predicted_impact_zone = Position(self.projected_collison_window.mean())
-        self.compute_time_before_impact(new_relative_hand_pos)
+        self.compute_time_before_impact()
         self.find_grip()
     
     def set_impact_ratio(self, ratio):
         self.ratio = ratio
 
-    def compute_time_before_impact(self, relative_hand_pos):
-        new_distance_to_hand = Position.distance(relative_hand_pos, self.predicted_impact_zone)
-        # print('hand_pos', relative_hand_pos)
-        # print('self.predicted_impact_zone)', self.predicted_impact_zone)
-        t = time.time()
-        dt = t-self.last_update_time
-        self.last_update_time = t
-        if dt != 0 :
-            distance_der = (self.distance_to_hand - new_distance_to_hand)/dt
+    def compute_time_before_impact(self):
+        new_distance_to_hand = Position.distance(self.relative_hand_pos, self.predicted_impact_zone)
+        if self.elapsed != 0 :
+            distance_der = (self.distance_to_hand - new_distance_to_hand)/self.elapsed
             if distance_der !=0:
                 #self.time_before_impact = new_distance_to_hand
                 self.time_before_impact = new_distance_to_hand/distance_der
@@ -644,6 +776,9 @@ class Target:
 
     def get_grip(self):
         return self.grip
+    
+    def get_info(self):
+        return self.object.name, self.grip, self.time_before_impact, self.ratio
 
 class GripSelector:
     def __init__(self) -> None:

@@ -494,7 +494,7 @@ class RigidObject(Entity):
             if pose is not None and timestamp is None:
                 raise ValueError('timestamp must be provided if pose is provided')
         else:
-            self.state = RigidObjectState.from_prediction(pose, timestamp)
+            self.state = RigidObjectState.from_pose(pose, timestamp)
         self.trajectory = RigidObjectTrajectory.from_state(self.state)
         self.score = score
         if render_box is None:

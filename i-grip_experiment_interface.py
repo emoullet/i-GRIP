@@ -505,7 +505,7 @@ class ExperimentProcessingInterface(ExperimentInterface):
         print("Building replay interface")
         self.ready_to_process_labels = ['Ready to process']
         self.to_process_label = 'To process'
-        self.partially_processed_label = 'Partially processed'
+        self.partially_processed_labels = ['Partially processed']
         self.already_processed_label = 'Already processed'
         self.trial_label_processed = ''
         self.process_labels = {'Processabe': self.ready_to_process_labels,
@@ -611,12 +611,13 @@ class ExperimentProcessingInterface(ExperimentInterface):
                 pseudo_checkbutton.config(style="primary.Outline.Toolbutton")
                 self.not_pre_processed_participants_buttons.append(pseudo_checkbutton)
                 self.processing.loc[index, 'Processable'] = True
-            elif row['Status'] == self.partially_processed_label:
+            elif row['Status'] in self.partially_processed_labels:
                 pseudo_checkbutton.config(style="warning.Outline.Toolbutton")
                 self.not_pre_processed_participants_buttons.append(pseudo_checkbutton)
                 self.processing.loc[index, 'Processable'] = True
             else:
                 pseudo_checkbutton.config(state="disabled", style="danger.Outline.Toolbutton")
+                self.processing.loc[index, 'Processable'] = False
                 
         self.valid_participants = self.processing.loc[self.processing['Processable']==True]
         
@@ -699,7 +700,7 @@ class ExperimentPreProcessingInterface(ExperimentProcessingInterface):
         self.ready_to_process_labels = ['Ready to pre-process']
         self.to_process_label = 'To Process'
         self.already_processed_label = 'Pre-processed'
-        self.partially_processed_label = 'Partially pre-processed'
+        self.partially_processed_labels = ['Partially pre-processed', 'Partially replayed', 'Partially analysed']
         
         self.trial_label_processed = ''
         self.process_labels = {'Name' : 'Pre-processing',
@@ -718,7 +719,7 @@ class ExperimentReplayInterface(ExperimentProcessingInterface):
         print("Building replay interface")
         self.ready_to_process_labels = ['Partially pre-processed', 'Pre-processed']
         self.already_processed_label = 'Replayed'
-        self.partially_processed_label = 'Partially replayed'
+        self.partially_processed_labels = ['Partially replayed', 'Partially analysed']
         
         self.trial_label_processed = ' pre-processed'
         self.process_labels = {'Name' : 'Replay',
@@ -728,7 +729,7 @@ class ExperimentReplayInterface(ExperimentProcessingInterface):
     def build_participants_layout(self):
         super().build_participants_layout()
         self.select_non_processed_participants_checkbutton.config(text="Select all not replayed participants")
-        self.select_processed_participants_checkbutton.config(text="Select all pre-processed participants")
+        self.select_processed_participants_checkbutton.config(text="Select all replayed participants")
         # if self.participants_frame is not None:
         #     self.participants_frame.destroy()
         # # add a ttk.label to this frame for the title of the database
@@ -820,17 +821,16 @@ class ExperimentReplayInterface(ExperimentProcessingInterface):
         #         pseudo_checkbutton.config(state="disabled", style="danger.Outline.Toolbutton")
         # self.valid_participants = self.participants.loc[self.participants['Pre-processable']==True]
                    
-        rticipants()
         
 
-class ExperimentAnalysisInterface(ExperimentInterface):
+class ExperimentAnalysisInterface(ExperimentProcessingInterface):
     def __init__(self):
         super().__init__(mode="Analysis")
         self.pseudo_button_default_state = ['!alternate']
         print("Building analysis interface")
         self.ready_to_process_labels = ['Partially replayed', 'Replayed']
         self.already_processed_label = 'Analysed'
-        self.partially_processed_label = 'Partially analysed'
+        self.partially_processed_labels = ['Partially analysed']
         
         self.trial_label_processed = ' replayed'
         self.process_labels = {'Name' : 'Analysis',
@@ -838,6 +838,10 @@ class ExperimentAnalysisInterface(ExperimentInterface):
                                'Already processed': self.already_processed_label}
 
 
+    def build_participants_layout(self):
+        super().build_participants_layout()
+        self.select_non_processed_participants_checkbutton.config(text="Select all not analysed participants")
+        self.select_processed_participants_checkbutton.config(text="Select all analysed participants")
             
 def get_row_and_column_index_from_index(index, nb_items_total):
     # get the number of rows and columns, knowing that the number of columns and rows should be as close as possible
@@ -860,7 +864,7 @@ if __name__ == "__main__":
     kill_gpu_processes()
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'replay', help="Mode of the interface")
+    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'pre_processing', help="Mode of the interface")
     args = vars(parser.parse_args())
     if args['mode'] == 'record':
         interface = ExperimentRecordingInterface()

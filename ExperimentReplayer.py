@@ -14,13 +14,14 @@ class ExperimentReplayer:
         os.environ['CUDA_VISIBLE_DEVICES'] = '0'
         self.device_id = device_id
         self.resolution = resolution
+        # self.resolution = (int(self.resolution[1]), int(self.resolution[0]))
         self.fps = fps
         
         dataset = "ycbv"        
         self.display_replay = display_replay
         
         # device_data = np.load('/home/emoullet/Documents/i-GRIP/DATA/Session_1/cam_19443010910F481300.npz')
-        self.hand_detector = hd.HybridOAKMediapipeDetector(replay=True, cam_params= device_data, resolution=resolution, fps=fps)
+        self.hand_detector = hd.HybridOAKMediapipeDetector(replay=True, cam_params= device_data, resolution=self.resolution, fps=fps)
         self.object_detector = o2d.get_object_detector(dataset,
                                                        device_data)
         self.object_pose_estimator = ope.get_pose_estimator(dataset,
@@ -31,7 +32,7 @@ class ExperimentReplayer:
             self.name = f'ExperimentReplayer_{dataset}'
         else:
             self.name = name
-        self.scene = sc.ReplayScene( device_data, name = f'{self.name}_scene')
+        self.scene = sc.ReplayScene( device_data, name = f'{self.name}_scene', dataset = dataset)
         # self.scene = sc.ReplayScene( device_data, name = f'{self.name}_scene')
         self.hand_detector.start()
     
@@ -45,33 +46,59 @@ class ExperimentReplayer:
         self.scene.reset()
         if name is not None:
             cv_window_name = f'{self.name} : Replaying {name}'
+            print(f'Replaying {name}')
         else:
             cv_window_name = f'{self.name} : Replaying'
-        detect = True
+        self.detect = True
         
         for timestamp in self.hand_detector.get_timestamps():
             success, img = self.hand_detector.next_frame()
             if not success:
                 continue
+            
+            img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
             render_img = img.copy()
             to_process_img = img.copy()
-            cv2.cvtColor(to_process_img, cv2.COLOR_RGB2BGR, to_process_img)
+            fac = 2
+            
+            to_process_img = cv2.cvtColor(to_process_img, cv2.COLOR_RGB2BGR)
+            # cv2.cvtColor(to_process_img, cv2.COLOR_RGB2BGR, to_process_img)
+            
+            smol_to_process_img = cv2.resize(to_process_img, (int(self.resolution[0]/fac), int(self.resolution[1]/fac)))
             
             # Hand detection
-            hands = self.hand_detector.get_hands(to_process_img)
+            hands = self.hand_detector.get_hands(smol_to_process_img)
+            # smol_hands = self.hand_detector.get_hands(smol_to_process_img)
+            # for hand in smol_hands:
+            #     hand.label = hand.label + '_smol'
             self.scene.update_hands(hands, timestamp)
 
             # Object detection
-            if detect:
+            if self.detect:
                 self.object_detections = self.object_detector.detect(to_process_img)
                 if self.object_detections is not None:
-                    detect = False
+                    self.detect = False
                 print('detect')
             else:
                 self.object_detections = None
 
             # Object pose estimation
             self.objects_pose = self.object_pose_estimator.estimate(to_process_img, detections = self.object_detections)
+            
+            # check if all objects are detected
+            expected_objects = sc.RigidObject.LABEL_EXPE_NAMES
+            for label in expected_objects:
+                if label not in self.objects_pose:
+                    self.detect = True
+                    
+            # remove unexpected objects
+            keys_to_remove = []
+            for label in self.objects_pose:
+                if label not in expected_objects:
+                    keys_to_remove.append(label)
+            for key in keys_to_remove:
+                del self.objects_pose[key]
+                
             self.scene.update_objects(self.objects_pose, timestamp)
             if self.display_replay:
                 self.scene.render(render_img)

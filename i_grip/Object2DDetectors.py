@@ -143,6 +143,94 @@ class Object2DDetector:
                 # cv2.waitKey(1)
         return self.detections
     
+    
+    def detect_lower(self, image): 
+        if image is None:
+            return None
+        print('DETECTING')       
+        #print(self.windows)
+        # print('ITERATION NUMBER '+str(self.it+1))
+        # os.system('nvidia-smi | grep python')
+        scale_percent = 50 # percent of original size
+        width = int(image.shape[1] * scale_percent / 100)
+        height = int(image.shape[0] * scale_percent / 100)
+        dim = (width, height)
+        
+        
+        # resize image
+        print(image.shape)
+        image = cv2.resize(image, dim, interpolation = cv2.INTER_AREA)
+        # print('RESIZE')
+        # print(image.shape)
+        # self.images_windows = torch.as_tensor(np.stack([image[w[0][1] : w[1][1], w[0][0] : w[1][0]] for w in self.windows] )).permute(0, 3, 1, 2).cuda().float()/ 255
+        
+        # os.system('nvidia-smi | grep python')
+        # self.image_full = torch.as_tensor(np.stack([image, ])).pin_memory().cuda().float() / 255
+        self.image_full = torch.as_tensor(np.stack([image, ])).permute(0, 3, 1, 2).cuda().float() / 255
+        # print('models loaded, not run yet : ')
+        # os.system('nvidia-smi | grep python')
+        if self.detecting:
+            self.forward_pass_full_detector()
+            # self.p_full = threading.Thread(target=self.forward_pass_full_detector)
+            # self.p_win = [threading.Thread(target=self.forward_pass_windows_detector)]
+            # self.p_full.start()
+            # for p in self.p_win:
+            #     p.start()
+            # print('bvwxjcksj,nb xcn,xk,')
+            # self.p_full.join()
+            # print('JSOKJNQSDKCJNSBZDKJNSBDJSN')
+            # for p in self.p_win:
+            #     p.join()
+            # print('models run ONCE : ')
+            # os.system('nvidia-smi | grep python')
+            # torch.cuda.empty_cache()
+            # print('CACHE CLEARED')
+            # os.system('nvidia-smi | grep python')
+            # if self.it !=0:
+            #     pass
+            #     #exit()
+            # self.it+=1
+            # detections_windows=None
+            # detections_full = None
+            # if detections_windows is not None:
+            #     print(detections_windows)
+            #     det_win_infos = detections_windows.infos
+            #     filtered_det_win_infos= det_win_infos.sort_values('score',ascending = False).drop_duplicates('label').sort_index()
+            #     ids = filtered_det_win_infos.index
+            #     im_ids = [i - 1 for i in filtered_det_win_infos['batch_im_id']]
+            #     gaps = [[w[0][0], w[0][0], w[1][0], w[1][0]] for w in [self.windows[j] for j in im_ids]]
+            #     gaps = torch.as_tensor(gaps).cuda().float()
+            #     print(filtered_det_win_infos)
+            #     print(gaps)
+            #     det_win_tensors = detections_windows.tensors['bboxes']
+            #     print(det_win_tensors)
+            #     print(im_ids)
+            #     filtered_det_win_tensors = det_win_tensors[ids,:]
+            #     print(filtered_det_win_tensors)
+            #     filtered_det_win_tensors = torch.add(filtered_det_win_tensors, gaps)
+            #     print(filtered_det_win_tensors)
+            #     self.detections = PandasTensorCollection(
+            #     infos=pd.DataFrame(filtered_det_win_infos),
+            #     bboxes=filtered_det_win_tensors,
+            #     )
+            #     self.detections.infos['batch_im_id'] = [0 for i in range(len(self.detections.infos['label']))]
+            #     if self.use_prior:
+            #         self.detecting = False
+            # else: 
+            #     self.detections = None
+            #     self.detecting =True
+            # exit()
+        else:
+            self.detections = None
+        # if type(self.detections) == list:
+        if self.detections is not None:
+            if len(self.detections)<=0 :
+                self.detections=None
+            # else:y                
+                # cv2.imshow('image',image)
+                # cv2.waitKey(1)
+        return self.detections
+    
     def stop(self):
         pass
 

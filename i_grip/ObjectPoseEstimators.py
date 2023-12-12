@@ -5,7 +5,7 @@ import cv2
 import numpy as np
 import pandas as pd
 from i_grip.image_utils import make_cameras
-from i_grip.model_utils import load_detector, load_pose_predictor
+from i_grip.model_utils import load_pose_predictor
 from cosypose.utils.tensor_collection import PandasTensorCollection,  fuse
 
 
@@ -77,7 +77,7 @@ class KnownObjectPoseEstimator:
         if predict:
             # image = torch.as_tensor(np.stack([self.format_crop(image), ])).permute(0, 3, 1, 2).cuda().float() / 255
             img = torch.as_tensor(np.stack([image, ])).permute(0, 3, 1, 2).cuda().float() / 255
-            cv2.imwrite('/home/emoullet/GitHub/i-GRIP/tset/img.png', image)
+            # cv2.imwrite('/home/emoullet/GitHub/i-GRIP/tset/img.png', image)
             # save detections.bboxes as file
             # np.savetxt('/home/emoullet/GitHub/i-GRIP/tset/detections.txt', detections.copy().cpu().bboxes)
             # save K as file
@@ -85,7 +85,7 @@ class KnownObjectPoseEstimator:
             if detections is not None and not self.fuse_detections:
             #if detections is not None:
                 self.pose_estimation_prior = None
-                print('NEW DETECTION')
+                # print('NEW DETECTION')
             else:
                 # print('TRACKING')
                 pass
@@ -94,12 +94,12 @@ class KnownObjectPoseEstimator:
                 n_coarse_iterations=1
             else:
                 n_coarse_iterations = 0
-            inps = dict(
-                images=img, K=self.K,
-                data_TCO_init=self.pose_estimation_prior,
-                n_coarse_iterations=n_coarse_iterations,
-                n_refiner_iterations=self.n_refiner_iterations,
-                detections=detections)
+            # inps = dict(
+            #     images=img, K=self.K,
+            #     data_TCO_init=self.pose_estimation_prior,
+            #     n_coarse_iterations=n_coarse_iterations,
+            #     n_refiner_iterations=self.n_refiner_iterations,
+            #     detections=detections)
             # print(f'inps : {inps}')
             self.pose_predictions, _ = self.predict(
                 images=img, K=self.K,
@@ -136,7 +136,7 @@ class KnownObjectPoseEstimator:
                 pose=self.pose_predictions.poses[n]
                 render_box=self.pose_predictions.boxes_rend[n]                
                 score=self.pose_predictions.infos['score'][n]
-                objects_predictions[label] = {'label':label, 'pose':pose, 'render_box':render_box, 'score':score, 'dataset':self.dataset}
+                objects_predictions[label] = ObjectPoseEstimation(label, pose, render_box, score, self.dataset)
         return objects_predictions
     
     def format(self, img):
@@ -157,7 +157,14 @@ class KnownObjectPoseEstimator:
     def emptyPrediction():
         return PandasTensorCollection(infos=pd.DataFrame(dict(label=[],)),
                                       poses=torch.empty((0, 4, 4)).float().cuda())
-
+class ObjectPoseEstimation:
+    def __init__(self, label , pose, render_box = None, score = None, dataset=None) -> None:
+        self.label = label
+        self.pose = pose
+        self.render_box = render_box
+        self.score = score
+        self.dataset = dataset
+        
 def get_pose_estimator(dataset, cam_data, use_tracking = True, fuse_detections = False):
 
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
