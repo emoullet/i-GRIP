@@ -2,7 +2,6 @@
 
 import threading
 import time
-from scipy.interpolate import CubicSpline
 
 import cv2
 import numpy as np
@@ -10,12 +9,14 @@ import trimesh as tm
 import pyfqmr
 import pyglet
 
-from i_grip.utils2 import *
-from i_grip import HandDetectors2 as hd
-from i_grip import ObjectPoseEstimators as ope
-import pandas as pd
-from mediapipe import solutions
-from mediapipe.framework.formats import landmark_pb2
+import matplotlib
+# matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
+
+from i_grip.utils2 import *   
+from i_grip.Hands import GraspingHand
+from i_grip.Objects import RigidObject
 
 class MeshScene(tm.Scene):
     def __init__(self, *args, **kwargs):
@@ -48,7 +49,7 @@ class Scene :
                                                     show_velocity_cone = True
                                                     )
     
-    def __init__(self, cam_data, name = 'Grasping experiment',  video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS, fps = 30.0, detect_grasping = True, draw_mesh = True, dataset = None) -> None:
+    def __init__(self, cam_data, name = 'Grasping experiment',  video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS, fps = 30.0, detect_grasping = True, draw_mesh = True, dataset = None, plotter=None) -> None:
         self.hands = dict()
         self.objects = dict()
         self.cam_data = cam_data
@@ -56,6 +57,8 @@ class Scene :
         self.rendering_options = video_rendering_options
         self.scene_rendering_options = scene_rendering_options
         self.show_velocity_cone = scene_rendering_options['show_velocity_cone']
+        self.show_trajectory = True
+        self.show_prediction = True
         self.time_scene = time.time()
         self.time_hands = self.time_scene
         self.time_objects = self.time_hands
@@ -67,6 +70,7 @@ class Scene :
         self.name = name
         self.draw_mesh = draw_mesh
         self.dataset= dataset
+        self.plotter = plotter
         
         self.timestep_index = 0
         
@@ -83,7 +87,7 @@ class Scene :
             self.define_mesh_scene()
         self.velocity_cone_mode = 'rays'
         
-            
+        
     def __str__(self) -> str:
         s = 'SCENE \n OBJECTS :\n'
         objs = self.objects.copy().items()
@@ -145,8 +149,9 @@ class Scene :
         self.t_scene.start()
         
     def display_meshes(self):
+        
         print('Starting mesh display thread')
-        self.scene_window = self.mesh_scene.show(callback=self.update_meshes,callback_period=self.scene_callback_period, line_settings={'point_size':20}, start_loop=False, visible= False, viewer='gl')
+        self.scene_window = self.mesh_scene.show(callback=self.update_meshes,callback_period=self.scene_callback_period, line_settings={'point_size':20}, start_loop=False, visible=    True, viewer='gl')
         # time.sleep(0.5)
         pyglet.app.run()
         print('Mesh display thread closed')
@@ -169,7 +174,7 @@ class Scene :
         self.fetch_all_targets(timestamp=timestamp)
 
     def new_hand(self, label, input= None, timestamp = None):
-        self.hands[label] = GraspingHand(label=label, input = input, timestamp = timestamp, compute_velocity_cone=self.show_velocity_cone)
+        self.hands[label] = GraspingHand(label=label, input = input, timestamp = timestamp, compute_velocity_cone=self.show_velocity_cone,plotter=self.plotter)
         self.new_hand_meshes.append({'mesh' : self.hands[label].mesh_origin, 'name': label})
     
     def update_hands(self, hands_predictions, timestamp = None):
@@ -232,7 +237,11 @@ class Scene :
             self.update_object_meshes(scene)
             if self.detect_grasping:
                 self.check_all_targets(scene)
-                # self.fetch_all_targets(timestamp=self.time_scene)
+                self.fetch_all_targets(timestamp=self.time_scene)
+            if self.show_trajectory:
+                self.update_trajectory_meshes(scene)
+            if self.show_prediction:
+                self.predict_future_trajectory(scene)
 
     def update_hands_meshes(self, scene):
         hands_to_delete = self.hands_to_delete.copy().keys()
@@ -294,15 +303,39 @@ class Scene :
             for olabel, obj in objs.items():
                 if olabel in scene.geometry:
                     mesh = scene.geometry[olabel]
-                    new, mesh_frame_locations = hand.check_target(obj, mesh)
+                    new, impacts_mesh_frame_locations = hand.check_target(obj, mesh)
                     if new:
                         scene.delete_geometry(hand.label+obj.label+'ray_impacts')
-                        if len(mesh_frame_locations)>0:
-                            impacts = tm.points.PointCloud(mesh_frame_locations, colors=hand.color)
+                        if len(impacts_mesh_frame_locations)>0:
+                            print('impacts_mesh_frame_locations', impacts_mesh_frame_locations)
+                            impacts = tm.points.PointCloud(impacts_mesh_frame_locations, colors=hand.color)
                             # scene.add_geometry(impacts, geom_name=hand.label+'ray_impacts')
                             scene.add_geometry(impacts, geom_name=hand.label+obj.label+'ray_impacts',transform = obj.get_mesh_transform())
                 else:
                     print('Mesh '+olabel+' has not been loaded yet')
+    
+    def update_trajectory_meshes(self, scene):
+        hands = self.hands.copy()
+        for hlabel, hand in hands.items():
+            if self.show_trajectory:
+                scene.delete_geometry(hand.label+'trajectory')
+                scene.delete_geometry(hand.label+'extrapolated_trajectory')
+                _observed_trajectory, extrapolated_trajectory = hand.get_trajectory_points()
+                if len(_observed_trajectory) :
+                    _observed_trajectory = tm.points.PointCloud(_observed_trajectory, colors=hand.color)
+                    scene.add_geometry(_observed_trajectory, geom_name=hand.label+'trajectory')
+                if len(extrapolated_trajectory):
+                    extrapolated_trajectory = tm.points.PointCloud(extrapolated_trajectory, colors=hand.extrapolated_trajectory_color)
+                    scene.add_geometry(extrapolated_trajectory, geom_name=hand.label+'extrapolated_trajectory')
+    
+    def predict_future_trajectory(self, scene):
+        hands= self.hands.copy()
+        for hlabel, hand in hands.items():
+            scene.delete_geometry(hand.label+'future_trajectory')
+            predicted_trajectory = hand.get_future_trajectory_points()
+            if len(predicted_trajectory):
+                predicted_trajectory = tm.points.PointCloud(predicted_trajectory, colors=hand.future_color)
+                scene.add_geometry(predicted_trajectory, geom_name=hand.label+'future_trajectory')
     
     def fetch_all_targets(self, timestamp = None):
         self.targets = {}
@@ -425,8 +458,8 @@ class LiveScene(Scene):
                                                     draw_grid = True,
                                                     show_velocity_cone = True)
         
-    def __init__(self, cam_data, name='Grasping experiment',   video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS, dataset='ycbv') -> None:
-        super().__init__(cam_data, name, video_rendering_options, scene_rendering_options, dataset=dataset)
+    def __init__(self, cam_data, name='Grasping experiment',   video_rendering_options = _DEFAULT_VIDEO_RENDERING_OPTIONS, scene_rendering_options = _DEFAULT_VIRTUAL_SCENE_RENDERING_OPTIONS, dataset='ycbv', plotter=None) -> None:
+        super().__init__(cam_data, name, video_rendering_options, scene_rendering_options, dataset=dataset, plotter=plotter)
     
     def render(self, img):
         # self.compute_distances()
@@ -504,567 +537,4 @@ class AnalysiScene(Scene):
                 hand.minimal_update(None)
         self.propagate_hands( timestamp = timestamp)
         
-
-class Entity:
-    
-    MAIN_DATA_KEYS = [ 'x', 'y', 'z']
-    
-    def __init__(self) -> None:
-        self.visible = True
-        self.lost = False
-        self.invisible_time = 0
-        self.max_invisible_time = 0.1
-        self.raw = {}
-        self.refined = {}
-        self.derivated = {}
-        self.derivated_refined = {}
-        self.refinable_keys = {}
-        self.filters={}
-        self.derivated_filters={}
-        self.elapsed=0
-        self.velocity = 0
-        self.normed_velocity = self.velocity
-        self.new= True
-        self.trajectory = pd.DataFrame(columns = ['Timestamps']+Entity.MAIN_DATA_KEYS)
-        self.state = None
-        self.mesh_updated = False
-        self.label = None
-
-    def setvisible(self, bool):
-        if not bool:
-            self.invisible_time += self.elapsed
-        elif self.visible:
-            self.invisible_time = 0
-        self.visible = bool
-        self.lost = not (self.invisible_time < self.max_invisible_time)
-
-    def set_elapsed(self, elapsed):
-        self.elapsed = elapsed
-
-    def pose(self):
-        return self.pose
-    
-    def position(self):
-        return self.pose.position.v
-    
-    def velocity(self):
-
-        return self.velocity
-    
-    def update_mesh(self):
-        pass
-    
-    def was_mesh_updated(self):
-        return self.mesh_updated
-
-    def set_mesh_updated(self, bool):
-        self.mesh_updated = bool
-        # print(f'{self.label} mesh updated : {self.mesh_updated}')
-    
-    def update_trajectory(self):
-        # add a new line to the trajectory dataframe with the current timestamp position and velocity
-        self.trajectory.add(self.state)
-    
-    def get_trajectory(self):
-        return self.trajectory.get_data()
-    
-    def load_trajectory(self, trajectory):
-        self.trajectory = trajectory
-        
-    def get_mesh_transform(self):
-        return self.mesh_transform
-    
-    def get_inv_mesh_transform(self):
-        return self.inv_mesh_transform
-    
-class RigidObject(Entity):
-    
-    MAIN_DATA_KEYS=RigidObjectTrajectory.DEFAULT_DATA_KEYS
-    
-    LABEL_EXPE_NAMES = {'obj_000002' : 'cheez\'it',
-                        'obj_000004' : 'tomato',
-                        'obj_000005' : 'mustard',
-                        'obj_000012' : 'bleach'}
-    
-    _TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad'
-    _YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models'
-    _TLESS_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/tless.cad/'
-    _YCVB_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/ycbv/'
-    
-    # def __init__(self, dataset = 'tless',  label = None, pose=None, score = None, render_box=None, timestamp = None, trajectory = None) -> None:
-    def __init__(self, input,  timestamp = None, dataset = None, label = None) -> None:
-        super().__init__()
-        self.dataset = dataset
-        self.label = label
-        if label in RigidObject.LABEL_EXPE_NAMES:
-            self.name = RigidObject.LABEL_EXPE_NAMES[label]
-        else:
-            self.name = label
-        self.default_color = (0, 255, 0)
-        if isinstance(input, ope.ObjectPoseEstimation):
-            self.was_built_from = 'prediction'
-            if timestamp is None:
-                raise ValueError('timestamp must be provided if pose is provided')
-            self.state = RigidObjectState.from_pose(input.pose, timestamp, position_factor=1000, flip_pos_y=True)
-            self.trajectory = RigidObjectTrajectory.from_state(self.state)
-            self.score = input.score
-            self.render_box = Bbox(self.label, input.render_box)
-        elif isinstance(input, pd.DataFrame):
-            self.was_built_from = 'trajectory'
-            self.trajectory = RigidObjectTrajectory.from_dataframe(input)
-            first_pose, first_timestamp = self.trajectory[0]
-            self.state = RigidObjectState.from_pose(first_pose, first_timestamp)
-            self.score = None
-            self.render_box = None
-        else:
-            raise ValueError('input must be either an ObjectPoseEstimation or a dataframe')
-            
-        if(dataset == "ycbv"):
-            self.mesh_path = RigidObject._YCVB_MESH_PATH
-            self.urdf_path = RigidObject._YCVB_URDF_PATH
-        elif(dataset == "tless"):
-            self.mesh_path = RigidObject._TLESS_MESH_PATH
-            self.urdf_path = RigidObject._TLESS_URDF_PATH
-        else:
-            raise ValueError('dataset must be either ycbv or tless')
-        
-        self.distances={}
-        print('object '+self.label+ ' discovered')
-        self.nb_updates = 10
-        self.target_metric = 0
-        
-        self.appearing_radius = 0.2
-        self.simplify = False
-        self.load_simplified = True
-        self.load_mesh()
-        # self.load_urdf()
-        self.mesh_pos = np.array([0,0,0])
-        self.mesh_transform = np.identity(4)
-        
-        self.is_targeted = False
-        self.targeter = None
-        self.target_info = None
-        if self.was_built_from == 'prediction':
-            self.update_display()
-        
-        # self.trajectory = pd.DataFrame(columns=['Timestamps', 'x', 'y', 'z', 'qx', 'qy', 'qz', 'qw', 'is_targeted', 'targeter', 'time_of_impact', 'grip'])
-    
-    @classmethod
-    def from_prediction(cls, prediction, timestamp):
-        return cls(dataset=prediction.dataset, label = prediction.label, pose = prediction.pose, score = prediction.score, render_box = prediction.render_box, timestamp = timestamp)
-    
-    @classmethod
-    def from_trajectory(cls, label, trajectory):
-        return cls(label = label, trajectory=trajectory)
-    
-    def load_mesh(self):
-        try :
-            if self.load_simplified:
-                self.mesh = tm.load_mesh(self.mesh_path+'_simplified/'+self.label+'.ply')
-                print('MESH LOADED : ' + self.mesh_path+'_simplified/'+self.label+'.ply')
-            else:
-                self.mesh = tm.load_mesh(self.mesh_path+'/'+self.label+'.ply')
-                print('MESH LOADED : ' + self.mesh_path+'/'+self.label+'.ply')
-            if self.simplify:
-                mesh_simplifier = pyfqmr.Simplify()
-                mesh_simplifier.setMesh(self.mesh.vertices,self.mesh.faces)
-                mesh_simplifier.simplify_mesh(target_count = 1000, aggressiveness=7, preserve_border=True, verbose=10)
-                v, f, n = mesh_simplifier.getMesh()
-                self.mesh = tm.Trimesh(vertices=v, faces=f, face_normals=n)
-            print(len(self.mesh.vertices))
-        except:
-            self.mesh = None
-            print(self.mesh_path)
-            print('MESH LOADING FAILED')
-    
-    def load_urdf(self):
-        self.mesh = tm.load_mesh(self.urdf_path+self.label+'/'+self.label+'.obj')
-        print('URDF LOADED : ' + self.urdf_path+self.label+'/'+self.label+'.obj')
-        exit()
-
-    
-    def update(self, new_prediction, timestamp = None):
-        self.state.update(new_prediction.pose, timestamp = timestamp)
-        self.render_box.update_coordinates(new_prediction.render_box)
-        if self.nb_updates <=15:
-            self.nb_updates+=2
-        self.update_trajectory()
-        self.set_mesh_updated(False)
-    
-    def update_pose(self, translation_vector, quaternion):
-        self.pose.update_from_vector_and_quat(translation_vector, quaternion)
-
-    def update_from_trajectory(self, index = None):
-        if index is None:
-            print(f'object {self.label} update from trajectory')
-            pose, timestamp = self.trajectory.__next__()
-        else:
-            pose, timestamp = self.trajectory[index]
-        self.state.update(pose)
-        self.state.propagate(timestamp)
-        self.set_mesh_updated(False)
-        
-    def update_mesh(self):
-        # print('update obj mesh try')
-        if self.was_mesh_updated():
-            return
-        self.mesh_pos = self.state.pose_filtered.position.v*np.array([-1,1,1])
-        # mesh_orient_quat = [self.pose.orientation.q[i] for i in range(4)]
-        # mesh_orient_angles = self.pose.orientation.v*np.array([-1,-1,-1])+np.pi*np.array([1  ,1,0])
-        mesh_orient_angles = self.state.pose_filtered.orientation.v*np.array([1,1,1])+np.pi*np.array([0 ,0,1])
-        # x_reflection_matrix = tm.transformations.reflection_matrix(np.array([0,0,0]), np.array([1,0,0]))
-        #mesh_transform = tm.transformations.translation_matrix(mesh_pos)  @ tm.transformations.quaternion_matrix(mesh_orient_quat)
-        rot_mat = tm.transformations.euler_matrix(mesh_orient_angles[0],mesh_orient_angles[1],mesh_orient_angles[2])
-        self.mesh_transform = tm.transformations.translation_matrix(self.mesh_pos) @ rot_mat
-        self.inv_mesh_transform = np.linalg.inv(self.mesh_transform)
-        self.set_mesh_updated(True)
-    
-    def write(self, img):
-        text = self.label 
-        x = self.render_box.corner1[0]
-        y = self.render_box.corner1[1]-60
-        dy = 15
-        cv2.rectangle(img, (x,y-20), (self.render_box.corner2[0],self.render_box.corner1[1]), (200,200,200), -1)
-        cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)    
-        if self.is_targeted:
-            text ='Trgt by : ' + self.targeter.label 
-            y+=dy
-            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
-            text = 'tbi : '+str(self.target_info.get_time_of_impact()) + 'ms'
-            y+=dy
-            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
-            text ='GRIP : '+self.target_info.get_grip()
-            y+=dy
-            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
-
-    def write_dist(self, img):
-        text = self.label
-        x = self.render_box.corner1[0]
-        y = self.render_box.corner2[1]
-        dy = 20
-        cv2.rectangle(img, (x,y), (self.render_box.corner2[0]+30,y+50), (200,200,200), -1)
-        for k, d in self.distances.items():
-            cv2.putText(img, 'd-'+k+' : '+str(int(d)) +' cm' , (x,y+20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, self.color)    
-            y+=dy
-
-    def render(self, img, bbox = True, txt=True, dist=False, overlay=False):
-        if self.was_built_from != 'prediction':
-            return
-        self.update_display()
-        if txt:
-            self.write(img)
-        if bbox:
-            self.render_box.draw(img)
-        if dist:
-            self.write_dist(img)
-        if overlay:
-            pass
-    
-    def distance_to(self, hand):
-        time_ = time.time()
-        print(hand.get_mesh_position())
-        (closest_points,
-        distances,
-        triangle_id) = self.mesh.nearest.on_surface(hand.get_mesh_position())
-        elapsed = time.time()-time_
-        print('elapsed : ', elapsed*1000)
-        self.distances[hand.label] = np.linalg.norm(100*self.pose.position.v - 0.1*hand.xyz)
-
-
-    def set_target_info(self, info):
-        self.is_targeted = info[0]
-        self.targeter = info[1]
-        self.target_info = info[2]
-        #if self.is_targeted:
-        #    print(self.label, 'is targeted by ', self.targeter.label, 'in', self.target_info.get_time_of_impact())
-
-    def update_display(self):
-        if self.is_targeted:
-            self.color = self.targeter.text_color
-            thickness = 4
-        else:
-            self.color = self.default_color
-            thickness = 2
-        self.render_box.update_display(self.color, thickness)
-        # print('DISPLAY UPDATED', time.time())
-    
-    def __str__(self):
-        out = 'label: ' + str(self.label) + '\n pose: {' +str(self.pose)+'} \n nb_updates: '+str(self.nb_updates)
-        return out
-    
-
-    
-class GraspingHand(Entity):
-    MAIN_DATA_KEYS=GraspingHandTrajectory.DEFAULT_DATA_KEYS
-    
-    def __init__(self, input, label = None, timestamp=None,  compute_velocity_cone = False)-> None:
-        super().__init__()
-        self.label = label
-        if input is None:
-            raise ValueError('input must be provided')
-        else:
-            if isinstance(input, hd.HandPrediction):
-                self.detected_hand = input
-                self.state = GraspingHandState.from_hand_detection(input, timestamp = timestamp)
-                if self.label is None:
-                    self.label = input.label         
-                self.trajectory = GraspingHandTrajectory.from_state(self.state)
-            elif isinstance(input, np.ndarray):
-                self.state = GraspingHandState.from_position(input, timestamp = timestamp)            
-                self.trajectory = GraspingHandTrajectory.from_state(self.state)
-            
-            elif isinstance(input, pd.DataFrame):
-                self.trajectory = GraspingHandTrajectory.from_dataframe(input)
-                first_position, first_timestamp = self.trajectory[0]
-                print(f'next hand position : {first_position, first_timestamp}')
-                self.state = GraspingHandState.from_position(first_position, timestamp = first_timestamp)
-            else:   
-                self.state = None
-        
-        self.new= True
-        self.visible = True
-        self.invisible_time = 0
-        self.max_invisible_time = 0.3
-        
  
-        # self.update_trajectory(timestamp)
-        self.compute_velocity_cone = compute_velocity_cone
-        self.show_label = True
-        self.show_xyz = True
-        self.show_roi = True
-        self.margin = 10  # pixels
-        self.font_size = 1
-        self.font_thickness = 1
-        self.handedness_text_color = (88, 205, 54) # vibrant green
-        self.font_size_xyz = 0.5
-    
-        ### define mesh
-        self.impact_locations = {}
-        self.hand_pos_obj_frame = {}
-        self.define_mesh_representation()
-        self.define_velocity_cone()
-        self.update_mesh()
-        
-        self.target_detector = TargetDetector(self.label)
-        self.most_probable_target = None
-        self.targets_data = pd.DataFrame(columns = ['Timestamp', 'label', 'grip', 'time_before_impact','ratio'])
-
-    @classmethod
-    def from_trajectory(cls, trajectory):
-        return cls(trajectory = trajectory)
-    
-    def build_from_hand_prediction(self, hand_prediction):
-        self.__dict__= hand_prediction.__dict__
-        if isinstance(hand_prediction, i_grip.HandDetectors.HandPrediction):
-            self.draw = hand_prediction.draw
-        self.base_dict = hand_prediction.__dict__
-        
-    def build_from_scratch(self, label):        
-        self.label = label
-        self.state = GraspingHandState()
-        
-    def define_mesh_representation(self):
-        self.mesh_origin = tm.primitives.Sphere(radius = 20)
-        if self.label == 'right':
-            self.mesh_origin.visual.face_colors = self.color = [255,0,0,255]
-            self.text_color = [0,0,255]
-        else:  
-            self.mesh_origin.visual.face_colors = self.color = [0,0,100,255]
-            self.text_color=[100,0,0]
-    
-    def define_velocity_cone(self,cone_max_length = 500, cone_min_length = 50, vmin=30, vmax=200, cone_max_diam = 200,cone_min_diam = 50, n_layers=5):
-        self.cone_angle = np.pi/8
-        self.n_layers = n_layers
-        self.cone_lenghts_spline = spline(vmin,vmax, cone_min_length, cone_max_length)
-        # self.cone_diam_spline = spline(vmin,vmax, cone_min_diam, cone_max_diam)
-        self.cone_diam_spline = spline(vmin,vmax, cone_max_diam, cone_min_diam)
-    
-    def update2(self, detected_hand):
-        self.detected_hand = detected_hand
-        self.state.update(detected_hand)
-        self.set_mesh_updated(False)
-    
-    # def minimal_update(self, pos):
-    #     self.xyz = pos*1000
-    #     self.raw['xyz'] = pos*1000
-    
-        
-    def update_from_trajectory(self, index = None):
-        if index is None:         
-            pos, timestamp= self.trajectory.__next__()
-        else:
-            pos, timestamp = self.trajectory[index]
-        self.state.update(pos)
-        self.state.propagate(timestamp)
-        self.set_mesh_updated(False)
-        
-    def propagate2(self, timestamp=None):
-        self.state.propagate(timestamp)
-        self.update_trajectory()
-        # self.update_meshes()
-              
-
-    def update_mesh(self):
-        if  self.was_mesh_updated():
-            return
-        self.mesh_position = Position(self.state.position_filtered*np.array([-1,1,1]))
-        # self.mesh_position = Position(self.state.velocity_filtered*np.array([-1,1,1])+np.array([0,0,500]))
-        self.mesh_transform= tm.transformations.compose_matrix(translate = self.mesh_position.v)
-        if self.compute_velocity_cone:
-            self.make_rays()
-        self.set_mesh_updated(True)
-        
-
-    def make_rays(self): 
-        vdir = self.state.get_movement_direction()
-        svel = self.state.scalar_velocity
-        if True:
-        # if svel > 10:
-            cone_len = self.cone_lenghts_spline(svel)
-            cone_diam = self.cone_diam_spline(svel)
-            # print('vdir', vdir)
-            # print('svel', svel)
-            # print('cone_len', cone_len)
-            # print('cone_diam', cone_diam)
-            # print('self.mesh_position.v', self.mesh_position.v)
-            # vecteur aléatoire
-            random_vector = np.random.rand(len(vdir))
-
-            # projection
-            projection = np.dot(random_vector, vdir)
-
-            # vecteur orthogonal
-            orthogonal_vector = random_vector - projection * vdir
-
-            # vecteur unitaire orthogonal
-            orthogonal_unit_vector = orthogonal_vector / np.linalg.norm(orthogonal_vector)
-            orthogonal_unit_vector2 = np.cross(vdir, orthogonal_unit_vector)
-
-            self.ray_directions_list = [ vdir*cone_len + (-cone_diam/2+i*cone_diam/(self.n_layers-1)) * orthogonal_unit_vector+ (-cone_diam/2+j*cone_diam/(self.n_layers-1)) * orthogonal_unit_vector2 for i in range(self.n_layers) for j in range(self.n_layers) ] 
-
-            self.ray_origins = np.vstack([self.mesh_position.v for i in range(self.n_layers) for j in range(self.n_layers) ])
-            self.ray_directions = np.vstack(self.ray_directions_list)
-            self.ray_visualize = tm.load_path(np.hstack((
-                self.ray_origins,
-                self.ray_origins + self.ray_directions)).reshape(-1, 2, 3))     
-        else:
-            self.ray_visualize = None
-
-    def check_target(self, obj, mesh):
-        if self.was_mesh_updated() and obj.was_mesh_updated():
-            inv_trans = obj.inv_mesh_transform
-            self.hand_pos_obj_frame[obj.label] = (inv_trans@self.mesh_position.ve)[:3]
-            # ray_directions_list = [ np.array([0,-1000,0]) + np.array([-200+i*100,0,-200+j*100] ) for i in range(5) for j in range(5) ]
-            rot = inv_trans[:3,:3]
-            ray_origins_obj_frame = np.vstack([ self.hand_pos_obj_frame[obj.label] for i in range(self.n_layers) for j in range(self.n_layers) ])
-            ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in self.ray_directions_list])    
-            try:
-                self.impact_locations[obj.label], _, _ = mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
-                                                                                ray_directions=ray_directions_obj_frame,
-                                                                                multiple_hits=False)
-            except:
-                self.impact_locations[obj.label] = []
-            new = True
-        else:
-            new = False
-            self.impact_locations[obj.label] = []
-        if len(self.impact_locations[obj.label])>0:
-            self.target_detector.new_impacts(obj, self.impact_locations[obj.label], self.hand_pos_obj_frame[obj.label], self.elapsed)
-        # obj.distance_to(self)
-        return new, self.impact_locations[obj.label]
-
-    def get_mesh_position(self):
-        return self.mesh_position.v
-        
-    def fetch_targets(self, timestamp = None):
-        self.most_probable_target, targets = self.target_detector.get_most_probable_target()
-        print(f'{self.label} hand most probable target : {self.most_probable_target}')
-        if self.most_probable_target is not None:
-            self.targets_data.loc[len(self.targets_data)] = [timestamp]+list(self.most_probable_target.get_info())
-        else:
-            self.targets_data.loc[len(self.targets_data)] = [timestamp, '-', '-', '-', '-']
-        return targets
-    
-    def render(self, img):
-        # Draw the hand landmarks.
-        # displayed_landmarks = self.state.landmarks
-        displayed_landmarks = self.detected_hand.get_landmarks()
-        landmarks_proto = landmark_pb2.NormalizedLandmarkList()
-        # landmarks_proto.landmark.extend([
-        #                                     landmark_pb2.NormalizedLandmark(x=landmark[0], y=landmark[1], z=landmark[2]) for landmark in displayed_landmarks])
-        landmarks_proto.landmark.extend([
-                                            landmark_pb2.NormalizedLandmark(x=landmark[0], y=landmark[1], z=landmark[2]) for landmark in displayed_landmarks])
-        solutions.drawing_utils.draw_landmarks(
-                                            img,
-                                            landmarks_proto,
-                                            solutions.hands.HAND_CONNECTIONS,
-                                            solutions.drawing_styles.get_default_hand_landmarks_style(),
-                                            solutions.drawing_styles.get_default_hand_connections_style())
-
-        if self.show_label:
-            # Get the top left corner of the detected hand's bounding box.
-            text_x = int(min(displayed_landmarks[:,0]))
-            text_y = int(min(displayed_landmarks[:,1])) - self.margin
-
-            # Draw handedness (left or right hand) on the image.
-            # cv2.putText(img, f"{self.handedness[0].category_name}",
-            #             (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
-            #             self.font_size, self.handedness_text_color, self.font_thickness, cv2.LINE_AA)
-            
-            cv2.putText(img, f"{self.label}",
-                        (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
-                        self.font_size, self.handedness_text_color, self.font_thickness, cv2.LINE_AA)
-        if self.show_roi:
-            cv2.rectangle(img, (self.detected_hand.roi[0],self.detected_hand.roi[1]),(self.detected_hand.roi[2],self.detected_hand.roi[3]),self.handedness_text_color)
-
-        if self.show_xyz:
-            # Get the top left corner of the detected hand's bounding box.z
-            
-            #print(f"{self.label} --- X: {self.xyz[0]/10:3.0f}cm, Y: {self.xyz[0]/10:3.0f} cm, Z: {self.xyz[0]/10:3.0f} cm")
-            if len(img.shape)<3:
-                height, width = img.shape
-            else:
-                height, width, _ = img.shape
-            x_coordinates = displayed_landmarks[:,0]
-            y_coordinates = displayed_landmarks[:,1]
-            x0 = int(max(x_coordinates) * width)
-            y0 = int(max(y_coordinates) * height) + self.margin
-
-            # Draw handedness (left or right hand) on the image.
-            cv2.putText(img, f"X:{self.state.position_filtered.x/10:3.0f} cm", (x0+10, y0+20), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (20,180,0), self.font_thickness, cv2.LINE_AA)
-            cv2.putText(img, f"Y:{self.state.position_filtered.y/10:3.0f} cm", (x0+10, y0+45), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (255,0,0), self.font_thickness, cv2.LINE_AA)
-            cv2.putText(img, f"Z:{self.state.position_filtered.z/10:3.0f} cm", (x0+10, y0+70), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (0,0,255), self.font_thickness, cv2.LINE_AA)
-
-    def get_target_data(self):
-        return self.targets_data
-    
-def rotation_from_vectors(v1, v2):
-
-    # Calcul de l'axe et de l'angle de rotation
-    axis = np.cross(v1, v2)
-    if np.linalg.norm(v1) * np.linalg.norm(v2) == 0:
-        angle = np.arccos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
-    else:
-        angle = np.arccos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
-
-    # # Création de la rotation à partir de l'axe et de l'angle
-    # r = R.from_rotvec(angle * axis)
-
-    # # Obtention du quaternion correspondant à la rotation
-    # q = r.as_quat()
-    q = tm.transformations.rotation_matrix(angle, axis)
-    return q
-
-def spline(x0,x1, y0, y1):
-
-    x=np.array([x0,x1])
-    y=np.array([y0, y1])
-    cs = CubicSpline(x,y, bc_type='clamped')
-    def eval(x):
-        if x<=x0:
-            return y0
-        elif x>=x1:
-            return y1
-        else:
-            return cs(x)
-    return eval

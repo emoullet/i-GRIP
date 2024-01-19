@@ -9,6 +9,13 @@ import pandas as pd
 import os
 from i_grip.HandDetectors2 import HandPrediction
 from i_grip.Filters import LandmarksSmoothingFilter
+from findiff import FinDiff
+import pynumdiff
+from scipy.interpolate import CubicSpline
+import trimesh as tm
+from sklearn.linear_model import Ridge
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import PolynomialFeatures, SplineTransformer
 
 class Position:
     def __init__(self, input = None, display='mm', swap_y = False) -> None:
@@ -81,6 +88,10 @@ class Position:
     
     def as_list(self):
         return self.v.tolist()
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+    
     @staticmethod
     def distance(p1 : 'Position', p2 : 'Position'):
         return np.linalg.norm(p1.v - p2.v)
@@ -246,347 +257,8 @@ class Bbox:
         self.color = color
         self.thickness = thickness
         
-class State:
-    def __init__(self) -> None:
-        self.updated = False
-        self.propagated = False
-        self.timestamp = None
-        
-    def set_updated(self, updated):
-        self.updated = updated
-        
-    def was_updated(self):
-        return self.updated
-    
-    def set_propagated(self, propagated):
-        self.propagated = propagated
-    
-    def was_propagated(self):
-        return self.propagated
-    
-    
-class RigidObjectState(State):
-    def __init__(self, pose = None, timestamp=None, position_factor=1, flip_pos_y = False, orientation_factor=1) -> None:
-        super().__init__()
-        self.position_factor = position_factor
-        self.orientation_factor = orientation_factor
-        self.flip_pos_y = flip_pos_y
-        if pose is None or timestamp is None:
-            self.pose = None
-            self.timestamp = None
-        else:
-            self.pose = Pose(pose, position_factor, orientation_factor, flip_pos_y=flip_pos_y)
-            self.pose_filtered = Pose(pose, position_factor, orientation_factor, filtered=True, flip_pos_y=flip_pos_y)
-            self.timestamp = timestamp
-    
-    @classmethod
-    def from_pose(cls, pose, timestamp, position_factor=1, flip_pos_y = False, orientation_factor=1):
-        return cls(pose, timestamp, position_factor, flip_pos_y, orientation_factor)
-    
-    def update(self, pose, timestamp=None):
-        self.pose.update(pose, flip_pos_y=self.flip_pos_y)
-        self.pose_filtered.update(pose, flip_pos_y=self.flip_pos_y)
-        self.timestamp = timestamp
-    
-    def update_from_vector_and_quat(self, translation_vector, quaternion, timestamp=None):
-        self.pose.update_from_vector_and_quat(translation_vector, quaternion, flip_pos_y=self.flip_pos_y)
-        self.pose_filtered.update_from_vector_and_quat(translation_vector, quaternion, flip_pos_y=self.flip_pos_y)
-        self.timestamp = timestamp
-    
-    def propagate(self, timestamp):
-        self.timestamp = timestamp
-        #TODO: propagate pose for tracking moving objects
-    
-    def as_list(self, timestamp=True, pose=True, pose_filtered=False):
-        repr_list = []
-        if timestamp:
-            repr_list.append(self.timestamp)
-        if pose:
-            repr_list += self.pose.as_list()
-        if pose_filtered:
-            repr_list += self.pose_filtered.as_list()
-        return repr_list
-        
-class GraspingHandState(State):
-    def __init__(self,  position=None, normalized_landmarks=None,  timestamp = None) -> None:
-        super().__init__()
-        self.position_raw = Position(position)
-        self.normalized_landmarks = normalized_landmarks
-        # if landmarks is None:
-        #     self.landmarks = np.zeros((21,3))
-        # else:
-        #     self.landmarks = landmarks
-        self.new_position = self.position_raw
-        self.new_normalized_landmarks = self.normalized_landmarks
-        
-        self.velocity_raw = np.array([0,0,0])
-        self.scalar_velocity = 0
-        self.normed_velocity = np.array([0,0,0])
-        self.position_filtered = self.position_raw
-        self.velocity_filtered = self.velocity_raw
-        self.filter_position, self.filter_velocity = Filter.both('position')
-        
-        if normalized_landmarks is not None:
-            self.normalized_landmarks_velocity = np.zeros((21,3))
-            self.normalized_landmarks_filtered = self.normalized_landmarks
-            self.normalized_landmarks_velocity_filtered = self.normalized_landmarks_velocity            
-            self.filter_normalized_landmarks, self.filter_normalized_landmarks_velocity= Filter.both('normalized_landmarks')
-            
-            
-        if timestamp is None:
-            self.last_timestamp = time.time()
-        else:
-            self.last_timestamp = timestamp
-        self.scalar_velocity_threshold = 20 #mm/s
-        
-    @classmethod
-    def from_hand_detection(cls, hand_detection: HandPrediction, timestamp = 0):
-        return cls(hand_detection.position, hand_detection.normalized_landmarks, timestamp)
-    
-    @classmethod
-    def from_position(cls, position: Position, timestamp = 0):
-        return cls(position, timestamp=timestamp)
 
-    def update_position(self, position):
-        self.new_position = Position(position)
-        
-    def update_normalized_landmarks(self, normalized_landmarks):
-        self.new_normalized_landmarks = normalized_landmarks
-    
-    def update(self, new_input):
-        if isinstance(new_input, HandPrediction):
-            self.update_position(new_input.position)
-            self.update_normalized_landmarks(new_input.normalized_landmarks)
-        elif isinstance(new_input, Position):
-            self.update_position(new_input)
-        elif new_input is None:
-            self.update_normalized_landmarks(new_input)
-        else:
-            print(f'weird input : {new_input}')
-        self.set_updated(True)
-        self.set_propagated(False)
-        
-    def propagate(self, timestamp, previous_states = None):
-        
-        elapsed = timestamp - self.last_timestamp
-        self.propagate_position(elapsed)
-        if self.normalized_landmarks is not None:
-            self.propagate_normalized_landmarks(elapsed)
-        self.last_timestamp = timestamp
-        self.set_updated(False)
-        self.set_propagated(True)
-        
-    def propagate_position(self, elapsed):
-        if not  self.was_updated():
-            next_position = self.position_raw
-        else:
-            next_position = self.new_position
-            next_position_filtered = Position(self.filter_position.apply(next_position.v))
-            if elapsed >0:
-                self.velocity_raw = (next_position_filtered.v - self.position_filtered.v)/elapsed
-            self.position_filtered = next_position_filtered
-            
-            self.velocity_filtered = self.filter_velocity.apply(self.velocity_raw)*np.array([-1,1,1])
-            
-            self.scalar_velocity = np.linalg.norm(self.velocity_filtered)
-            if self.scalar_velocity != 0:
-                if self.scalar_velocity > self.scalar_velocity_threshold:
-                    self.normed_velocity = self.velocity_filtered/self.scalar_velocity
-                else:
-                    self.normed_velocity = self.normed_velocity*98/100 + self.velocity_filtered/self.scalar_velocity*2/100
-            else:
-                self.normed_velocity = np.array([0,0,0])
-                
-            self.position_raw = next_position
-        
-    def propagate_normalized_landmarks(self, elapsed):
-        if not  self.was_updated():
-            # next_normalized_landmarks = self.normalized_landmarks + elapsed*self.normalized_landmarks_velocity
-            next_normalized_landmarks = self.normalized_landmarks
-            self.normalized_landmarks_velocity = self.normalized_landmarks_velocity
-        else:
-            next_normalized_landmarks = self.new_normalized_landmarks
-            if elapsed >0:
-                self.normalized_landmarks_velocity = (self.new_normalized_landmarks - self.normalized_landmarks)/elapsed
-            
-        self.normalized_landmarks_filtered = self.filter_normalized_landmarks.apply(next_normalized_landmarks)
-        self.normalized_landmarks_velocity_filtered = self.filter_normalized_landmarks_velocity.apply(self.normalized_landmarks_velocity)
-            
-        self.normalized_landmarks = next_normalized_landmarks
-    
-    
-    def get_movement_direction(self):
-        point_down_factor = -0.3
-        vdir = self.normed_velocity + np.array([0,point_down_factor,0])
-        if np.linalg.norm(vdir) != 0:
-            vdir = vdir / np.linalg.norm(vdir)
-        return vdir
-
-    # def get_movement_direction_two_third_law(self):
-        
-    def get_timestamp(self):
-        return self.last_timestamp
-    
-    def as_list(self, timestamp=True, position=False, normalized_landmarks=False, velocity=False, normalized_landmarks_velocity=False, filtered_position=False, filtered_velocity=False, filtered_normalized_landmarks=False, filtered_normalized_landmarks_velocity=False, normalized_velocity=False, scalar_velocity=False):
-        repr_list = []
-        if timestamp:
-            repr_list.append(self.last_timestamp)
-        if position:
-            repr_list += self.position_raw.as_list()
-        if normalized_landmarks:
-            repr_list += self.normalized_landmarks.flatten().tolist()
-        if velocity:
-            repr_list += self.velocity_raw.tolist()
-        if normalized_landmarks_velocity:
-            repr_list += self.normalized_landmarks_velocity.flatten().tolist()
-        if filtered_position:
-            repr_list += self.position_filtered.as_list()
-        if filtered_velocity:
-            repr_list += self.velocity_filtered.tolist()
-        if filtered_normalized_landmarks:
-            repr_list += self.normalized_landmarks_filtered.flatten().tolist()
-        if filtered_normalized_landmarks_velocity:
-            repr_list += self.normalized_landmarks_velocity_filtered.flatten().tolist()
-        if normalized_velocity:
-            repr_list += self.normed_velocity.tolist()
-        if scalar_velocity:
-            repr_list.append(self.scalar_velocity)
-        return repr_list
-
-class Trajectory():
-    
-    DATA_KEYS = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'v']
-    
-    def __init__(self, state = None, headers_list=DATA_KEYS, attributes_dict=None, file = None, dataframe =None) -> None:
-        self.attributes_dict = attributes_dict
-        if dataframe is not None:
-            self.data = dataframe                
-        elif file is not None:
-            #check if file exists and is a csv file
-            if not os.path.isfile(file):
-                raise ValueError(f'File {file} does not exist')
-            elif not file.endswith('.csv'):
-                raise ValueError(f'File {file} is not a csv file')
-            else:
-                self.data = pd.read_csv(file)
-        else:       
-            self.data = pd.DataFrame(columns=headers_list)
-            self.add(state)
-        self.current_state = None
-        self.current_line_index = 0
-        self.states = []
-        
-    @classmethod
-    def from_dataframe(cls, df:pd.DataFrame):
-        return cls(dataframe=df)
-    
-    @classmethod
-    def from_file(cls, file):
-        return cls(file=file)
-    
-    @classmethod
-    def from_state(cls, state):
-        return cls(state = state)
-    
-    def add(self, new_state:State):
-        if new_state is not None:
-            self.data.loc[len(self.data)] = new_state.as_list(**self.attributes_dict)
-            self.states.append(new_state)
-            
-    def get_data(self):
-        return self.data
-
-    def __iter__(self):
-        self.current_line_index = 0
-        return self
-    
-    def __next__(self):
-        if self.current_line_index < len(self.data):
-            row = self.data.iloc[self.current_line_index]
-            self.current_line_index+=1
-            return row
-        else:
-            raise StopIteration
-    
-    def find_plane(self, nb_points):
-        # find regression plane for the last nb_points of the trajectory
-        if len(self.data) < nb_points:
-            raise ValueError('Not enough data points to find a plane')
-        else:
-            last_points = self.data.iloc[-nb_points:]
-            x = last_points['x']
-            y = last_points['y']
-            z = last_points['z']
-            A = np.array([x,y,np.ones(len(x))]).T
-            B = z
-            a,b,c = np.linalg.lstsq(A,B,rcond=None)[0]
-            return a,b,c
-        
-    
-class GraspingHandTrajectory(Trajectory):
-    
-    DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z']
-    DEFAULT_ATTRIBUTES  = dict(timestamp=True, filtered_position=True)
-    
-    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None, dataframe=None) -> None:
-        super().__init__(state, headers_list, attributes_dict, file, dataframe)
-    
-    def __next__(self):
-        if self.current_line_index < len(self.data):
-            row = self.data.iloc[self.current_line_index]
-            # print(f'data : {self.data}')
-            # print('row', row)
-            self.current_line_index+=1
-            return Position(np.array([row['x'], row['y'], row['z']]), display='cm', swap_y=True), row['Timestamps']
-        else:
-            raise StopIteration
-        
-    def __getitem__(self, index):
-        if index < len(self.data):
-            row = self.data.iloc[index]
-            return Position(np.array([row['x'], row['y'], row['z']]), display='cm', swap_y=True), row['Timestamps']
-        else:
-            raise IndexError('Index out of range')
-
-class RigidObjectTrajectory(Trajectory):
-    
-    DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z', 'qx', 'qy', 'qz', 'qw']
-    DEFAULT_ATTRIBUTES  = dict(timestamp=True, pose=True)
-    
-    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None, dataframe = None) -> None:
-        super().__init__(state, headers_list, attributes_dict, file, dataframe)
-
-    def __next__(self):
-        if self.current_line_index < len(self.data):
-            row = self.data.iloc[self.current_line_index]
-            self.current_line_index+=1
-            return Pose.from_vector_and_quat(np.array([row['x'], row['y'], row['z']]), np.array([row['qx'], row['qy'], row['qz'], row['qw']])), row['Timestamps']
-        else:
-            raise ValueError('No more data in trajectory')
-    
-    def __getitem__(self, index):
-        if index < len(self.data):
-            row = self.data.iloc[index]
-            return Pose.from_vector_and_quat(np.array([row['x'], row['y'], row['z']]), np.array([row['qx'], row['qy'], row['qz'], row['qw']])), row['Timestamps']
-        else:
-            raise IndexError('Index out of range')
-    
-class DataWindow:
-    def __init__(self, size:int) -> None:
-        self.size = size # nb iterations or time limit ?
-        self.data = list()
-        self.nb_samples = 0
-    
-    def queue(self, new_data):
-        self.data.append(new_data)
-        if len(self.data)>= self.size:
-            del self.data[0]
-        else:
-            self.nb_samples+=1
-
-class Filter(LandmarksSmoothingFilter):
-    
-    
+class Filter(LandmarksSmoothingFilter):    
     def __init__(self, key, type='natural') -> None:
         min_cutoffs = {'landmarks' : 0.001, 'world_landmarks' : 0.001, 'position': 1, 'normalized_landmarks' : 0.15, 'orientation' : 0.0001} 
         betas = {'landmarks' : 0.5, 'world_landmarks' : 0.5, 'position': 0.5, 'normalized_landmarks' : 50, 'orientation' : 0.5}
@@ -619,170 +291,179 @@ class Filter(LandmarksSmoothingFilter):
     def both(cls, key):
         return cls(key, type='natural'), cls(key, type='derivative')
     
-class HandConeImpactsWindow(DataWindow):
-    def __init__(self, size: int) -> None:
-        super().__init__(size)
-        self.nb_impacts = 0
 
-    # def mean(self):
-    #     if self.nb_samples==0:
-    #         return None
-    #     sum = 0
-    #     for i in range(self.data):
-    #         sum+=np.mean(self.data[i])
-    #     return sum/self.nb_samples
-
-    def queue(self, new_data):
-        self.data.append(new_data)
-        #print('new_data', type(new_data))
-        if len(self.data)>= self.size:
-            deleted =  self.data.pop(0)
-            self.nb_impacts = self.nb_impacts - len(deleted) + len(new_data)
-        else:
-            self.nb_impacts = self.nb_impacts + len(new_data)
-            self.nb_samples+=1
-    def mean(self):
-        sum = np.array([0.,0.,0.])
-        for l_imp in self.data:
-            if len(l_imp)>0:
-                #print('l_imp', l_imp)
-                a=np.array([np.mean(l_imp[:,i]) for i in range(3)])
-                #print('a',a)
-                sum += a
-        nb = len(self.data)
-        if nb >0:
-            mean = sum / nb
-        else:
-            mean = sum
-        return mean
-    def get_nb_impacts(self):
-        return self.nb_impacts
+class Entity:
     
-class TargetDetector:
-    def __init__(self, hand_label, window_size = 100) -> None:
-        self.window_size = window_size
-        self.potential_targets = {}
-        self.hand_label = hand_label
-        # self.derivative_min_cutoff = derivative_min_cutoff
-        # self.derivative_beta = derivative_beta
-        # self.derivative_derivate_cutoff = derivative_derivate_cutoff
+    MAIN_DATA_KEYS = [ 'x', 'y', 'z']
     
-    def new_impacts(self, obj, impacts, relative_hand_pos, elapsed):
-        label = obj.label
-        relative_hand_pos = Position(relative_hand_pos)
-        #print('impacts', impacts)
-        if label in self.potential_targets:
-            self.potential_targets[label].update(impacts, relative_hand_pos, elapsed) 
-        elif len(impacts)>0:
-            self.potential_targets[label] = Target(obj, impacts, relative_hand_pos)
-
-    def get_most_probable_target(self):
-        if self.potential_targets:
-            n_impacts = {}
-            n_tot = 0
-            to_del_keys=[]
-            for lab, target in self.potential_targets.items():
-                n_impacts[lab] = target.projected_collison_window.get_nb_impacts()
-                if n_impacts[lab]<=0:
-                    to_del_keys.append(lab)
-                n_tot +=n_impacts[lab]
-
-            for key in to_del_keys:
-                del self.potential_targets[key]
-
-            if n_tot == 0:
-                most_probable_target =  None                
-            else:
-                for lab in self.potential_targets:
-                    self.potential_targets[lab].set_impact_ratio(n_impacts[lab]/n_tot)
-                max_ratio_label = max(n_impacts, key = n_impacts.get)
-                most_probable_target = self.potential_targets[max_ratio_label]
-        else:
-            most_probable_target =  None
-        
-        # print(self.hand_label,' most_probable_target : ',most_probable_target)
-        return most_probable_target, self.potential_targets
-
-       #def set_hand_pos_vel(self, hand_pos, hand_vel):
-        #self.hand_pos = hand_pos
-        #self.hand_vel = hand_vel
-
-    #def compute_time_before_impact(self):
-    #    for tar in self.potential_targets:
-    #         """
-
-class Target:
-    def __init__(self, obj, impacts,  relative_hand_pos,  window_size = 10) -> None:
-        self.object = obj
-        self.label = obj.label
-        self.window_size = window_size
-        self.projected_collison_window = HandConeImpactsWindow(window_size)
-        print(f'POTENTIAL TARGET {self.label}')
-        self.ratio=0
-        self.distance_derivative = 0
-        self.projected_collison_window.queue(impacts)
-        self.predicted_impact_zone = Position(self.projected_collison_window.mean())
-        self.distance_to_hand = Position.distance(relative_hand_pos, self.predicted_impact_zone)
-        self.time_before_impact = 0
-        self.grip = 'None'
-        # self.derived_filter = LandmarksSmoothingFilter(min_cutoff=derivative_min_cutoff, beta=derivative_beta, derivate_cutoff=derivative_derivate_cutoff, disable_value_scaling=True)
-        self.relative_hand_pos = relative_hand_pos
-        self.find_grip()
-        self.elapsed = 0
-
-    def update(self, impacts, new_relative_hand_pos, elapsed):        
-        if elapsed != 0:
-            self.elapsed = elapsed
-            # self.relative_hand_vel = (new_relative_hand_pos.v - self.relative_hand_pos.v)/elapsed
-            self.relative_hand_pos = new_relative_hand_pos
-        self.projected_collison_window.queue(impacts)
-        self.predicted_impact_zone = Position(self.projected_collison_window.mean())
-        self.compute_time_before_impact()
-        self.find_grip()
-    
-    def set_impact_ratio(self, ratio):
-        self.ratio = ratio
-
-    def compute_time_before_impact(self):
-        new_distance_to_hand = Position.distance(self.relative_hand_pos, self.predicted_impact_zone)
-        if self.elapsed != 0 :
-            distance_der = (self.distance_to_hand - new_distance_to_hand)/self.elapsed
-            if distance_der !=0:
-                #self.time_before_impact = new_distance_to_hand
-                self.time_before_impact = new_distance_to_hand/distance_der
-            self.distance_to_hand = new_distance_to_hand
-            self.distance_derivative = distance_der
-        #print('new_distance_to_hand',new_distance_to_hand)
-        # print('time to impact', int(self.time_before_impact ), 'ms')
-
-    def __str__(self) -> str:
-        out = 'Target: '+self.object.label + ' - nb impacts: ' + str(self.projected_collison_window.nb_impacts) + ' - ratio: ' + str(self.ratio)
-        return out
-    
-    def get_proba(self):
-        return self.ratio
-
-    def get_time_of_impact(self, unit = 'ms'):
-        if unit == 'ms':
-            return int(self.time_before_impact*1000)
-        if unit == 's':
-            return int(self.time_before_impact)
-    
-    def find_grip(self):
-        if abs(self.predicted_impact_zone.v[0])>20:
-            self.grip = 'PINCH'
-        else:
-            self.grip = 'PALMAR'
-
-    def get_grip(self):
-        return self.grip
-    
-    def get_info(self):
-        return self.object.name, self.grip, self.time_before_impact, self.ratio
-
-class GripSelector:
     def __init__(self) -> None:
+        self.visible = True
+        self.lost = False
+        self.invisible_time = 0
+        self.max_invisible_time = 0.1
+        self.raw = {}
+        self.refined = {}
+        self.derivated = {}
+        self.derivated_refined = {}
+        self.refinable_keys = {}
+        self.filters={}
+        self.derivated_filters={}
+        self.elapsed=0
+        self.velocity = 0
+        self.normed_velocity = self.velocity
+        self.new= True
+        self.trajectory = pd.DataFrame(columns = ['Timestamps']+Entity.MAIN_DATA_KEYS)
+        self.state = None
+        self.mesh_updated = False
+        self.label = None
+
+    def setvisible(self, bool):
+        if not bool:
+            self.invisible_time += self.elapsed
+        elif self.visible:
+            self.invisible_time = 0
+        self.visible = bool
+        self.lost = not (self.invisible_time < self.max_invisible_time)
+
+    def set_elapsed(self, elapsed):
+        self.elapsed = elapsed
+
+    def pose(self):
+        return self.pose
+    
+    def position(self):
+        return self.pose.position.v
+    
+    def velocity(self):
+
+        return self.velocity
+    
+    def update_mesh(self):
         pass
+    
+    def was_mesh_updated(self):
+        return self.mesh_updated
+
+    def set_mesh_updated(self, bool):
+        self.mesh_updated = bool
+        # print(f'{self.label} mesh updated : {self.mesh_updated}')
+    
+    def update_trajectory(self):
+        # add a new line to the trajectory dataframe with the current timestamp position and velocity
+        self.state.trajectory.add(self.state)
+    
+    def get_trajectory(self):
+        return self.state.trajectory.get_data()
+    
+    def load_trajectory(self, trajectory):
+        self.state.trajectory = trajectory
+        
+    def get_mesh_transform(self):
+        return self.mesh_transform
+    
+    def get_inv_mesh_transform(self):
+        return self.inv_mesh_transform
+  
+   
+
+class State:
+    def __init__(self) -> None:
+        self.updated = False
+        self.propagated = False
+        self.last_timestamp = None
+        
+    def set_updated(self, updated):
+        self.updated = updated
+        
+    def was_updated(self):
+        return self.updated
+    
+    def set_propagated(self, propagated):
+        self.propagated = propagated
+    
+    def was_propagated(self):
+        return self.propagated
+    
+    def get_timestamp(self):
+        return self.last_timestamp
+
+class Trajectory():
+    
+    DATA_KEYS = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'v']
+    
+    def __init__(self, state = None, headers_list=DATA_KEYS, attributes_dict=None, file = None, dataframe =None) -> None:
+        self.attributes_dict = attributes_dict
+        if dataframe is not None:
+            self.data = dataframe                
+        elif file is not None:
+            #check if file exists and is a csv file
+            if not os.path.isfile(file):
+                raise ValueError(f'File {file} does not exist')
+            elif not file.endswith('.csv'):
+                raise ValueError(f'File {file} is not a csv file')
+            else:
+                self.data = pd.read_csv(file)
+        else:       
+            self.data = pd.DataFrame(columns=headers_list)
+            self.add(state)
+        self.current_state = None
+        self.current_line_index = 0
+        # self.states = []
+        
+    @classmethod
+    def from_dataframe(cls, df:pd.DataFrame):
+        return cls(dataframe=df)
+    
+    @classmethod
+    def from_file(cls, file):
+        return cls(file=file)
+    
+    @classmethod
+    def from_state(cls, state):
+        return cls(state = state)
+    
+    def add(self, new_state:State, extrapolated=False):
+        if new_state is not None:
+            timestamp = new_state.get_timestamp()
+            if timestamp in self.data['Timestamps'].values:
+                print(f'Timestamp {timestamp} already in trajectory, ignoring new state')
+                return
+            else:
+                new_entries = new_state.as_list(**self.attributes_dict)+[extrapolated]
+                self.data.loc[len(self.data)] = new_entries
+            # self.states.append(new_state)
+            
+    def get_data(self):
+        return self.data
+
+    def __iter__(self):
+        self.current_line_index = 0
+        return self
+    
+    def __next__(self):
+        if self.current_line_index < len(self.data):
+            row = self.data.iloc[self.current_line_index]
+            self.current_line_index+=1
+            return row
+        else:
+            raise StopIteration
+    
+    def find_plane(self, nb_points):
+        # find regression plane for the last nb_points of the trajectory
+        if len(self.data) < nb_points:
+            raise ValueError('Not enough data points to find a plane')
+        else:
+            last_points = self.data.iloc[-nb_points:]
+            x = last_points['x']
+            y = last_points['y']
+            z = last_points['z']
+            A = np.array([x,y,np.ones(len(x))]).T
+            B = z
+            a,b,c = np.linalg.lstsq(A,B,rcond=None)[0]
+            return a,b,c
+    def __repr__(self) -> str:
+        return self.data.__repr__()
+        
 
 def kill_gpu_processes():
     # use the command nvidia-smi and then grep "grasp_int" and "python" to get the list of processes running on the gpu
@@ -805,3 +486,169 @@ def kill_gpu_processes():
         print(f"Killed processes with ids {ids}")
     except Exception as e:
         print(f"No remnant processes found on the gpu")
+        
+def findiff_diff(times, values, diff_order=1, diff_acc=10):
+    # times and values must be numpy arrays
+    # times must be sorted
+    # values must be a 1D array
+    # times and values must have the same length
+    # times must be in seconds
+    # values must be in mm
+    if len(times)!=len(values):
+        raise ValueError('times and values must have the same length')
+    if len(times.shape)!=1:
+        raise ValueError('times must be a 1D array')
+    if not np.all(np.diff(times)>=0):
+        raise ValueError('times must be sorted')
+    if not np.all(np.diff(times)>0):
+        print('Warning : times must be strictly increasing')
+    # print('order', diff_order)
+    print('times', times- times[0])
+    # dt = np.gradient(times)
+    print(f'diff_acc : {diff_acc}')
+    d_dt = FinDiff(0, times, diff_order, acc=diff_acc)
+    dvals = np.gradient(values, times)
+    # print('dt', dt[-5:])
+    # print('values', values[-5:])
+    d_values = d_dt(values)
+    # print('d_values', d_values[-5:])
+    # d_values2 = np.gradient(values[:,0], times)
+    # print('d_values2', d_values2[-5:])
+    # dt3 = np.array((dt.T, dt.T, dt.T))
+    # d_values2_dt = d_values2/dt3
+    # print('d_values2_dt', d_values2_dt[-5:])
+    
+    # x = np.linspace(0,10,11)
+    # dx = x[1]-x[0]
+    # f =2*x
+    # print('x', x)
+    # print('dx', dx)
+    # print('f', f)   
+    # d_dx = FinDiff(0, dx, diff_order, acc=diff_acc)
+    # vx = d_dx(f)
+    # print('vx', vx)
+    
+    return d_values[-1]
+    # vals = d_dx(f)
+    # return vals[-1]
+
+def pynumdiff_diff(times, values, diff_order=1, diff_acc=5):
+    # times and values must be numpy arrays
+    # times must be sorted
+    # values must be a 1D array
+    # times and values must have the same length
+    # times must be in seconds
+    # values must be in mm
+    if len(times)!=len(values):
+        raise ValueError('times and values must have the same length')
+    if len(times.shape)!=1:
+        raise ValueError('times must be a 1D array')
+    if len(values.shape)!=1:
+        raise ValueError('values must be a 1D array')
+    if times.shape != values.shape:
+        raise ValueError('times and values must have the same shape')
+    if not np.all(np.diff(times)>=0):
+        raise ValueError('times must be sorted')
+    if not np.all(np.diff(times)>0):
+        print('Warning : times must be strictly increasing')
+    dt = np.diff(times)
+    d_dt = pynumdiff.total_variation_regularization.d_dt(dt, diff_order, acc=diff_acc)
+    last_vs = pynumdiff.smooth_finite_difference.meandiff
+    d_values = d_dt(values)
+    return d_values[-1]
+
+def my_polydiff(timestamps, values, poly_degree, diff_order=1, diff_acc=None):
+    # times and values must be numpy arrays
+    # times must be sorted
+    # values must be a 1D array
+    # times and values must have the same length
+    # times must be in seconds
+    # values must be in mm
+    if len(timestamps)!=len(values):
+        raise ValueError('times and values must have the same length')
+    if len(timestamps.shape)!=1:
+        raise ValueError('times must be a 1D array')
+    if len(values.shape)!=3:
+        raise ValueError('values must be a 3D array')
+    if not np.all(np.diff(timestamps)>=0):
+        raise ValueError('times must be sorted')
+    if not np.all(np.diff(timestamps)>0):
+        print('Warning : times must be strictly increasing')
+    
+    if diff_acc is not None:
+        timestamps = timestamps[::diff_acc]
+
+    # Example 3D variable time series (replace this with your data)
+    x_values = values[:,0]
+    y_values = values[:,1]
+    z_values = values[:,2]
+    
+    # Fit a polynomial function to the data (degree can be adjusted)
+    poly_degree = 2  # Change the degree of the polynomial as needed
+    poly_x = np.polynomial.polynomial.Polynomial.fit(timestamps, x_values, poly_degree)
+    poly_y = np.polynomial.polynomial.Polynomial.fit(timestamps, y_values, poly_degree)
+    poly_z = np.polynomial.polynomial.Polynomial.fit(timestamps, z_values, poly_degree)
+
+    coeff_x = poly_x.coef
+    coeff_y = poly_y.coef
+    coeff_z = poly_z.coef
+
+    # Generate a polynomial function using the coefficients
+    
+    poly_func_x = np.poly1d(coeff_x)
+    poly_func_y = np.poly1d(coeff_y)
+    poly_func_z = np.poly1d(coeff_z)
+
+    # Calculate derivatives of the polynomial functions (velocity)
+    delta_t = np.diff(timestamps)  # Calculate time differences
+    vel_poly_x = np.polyder(poly_func_x, m=diff_order)  # Derivative for velocity in x
+    vel_poly_y = np.polyder(poly_func_y, m=diff_order)  # Derivative for velocity in y
+    vel_poly_z = np.polyder(poly_func_z, m=diff_order)  # Derivative for velocity in z
+
+    # Calculate velocities at specific timestamps
+    velocities_x = vel_poly_x(timestamps[-1]) 
+    velocities_y = vel_poly_y(timestamps[-1]) 
+    velocities_z = vel_poly_z(timestamps[-1]) 
+    # velocities_x = vel_poly_x(timestamps[-1]) / delta_t
+    # velocities_y = vel_poly_y(timestamps[-1]) / delta_t
+    # velocities_z = vel_poly_z(timestamps[-1]) / delta_t
+
+    # Print velocities at specific timestamps
+    print("Velocity in x-direction:", velocities_x)
+    print("Velocity in y-direction:", velocities_y)
+    print("Velocity in z-direction:", velocities_z)
+    
+
+    return d_values[-1]
+
+
+def spline(x0,x1, y0, y1):
+
+    x=np.array([x0,x1])
+    y=np.array([y0, y1])
+    cs = CubicSpline(x,y, bc_type='clamped')
+    def eval(x):
+        if x<=x0:
+            return y0
+        elif x>=x1:
+            return y1
+        else:
+            return cs(x)
+    return eval
+
+def rotation_from_vectors(v1, v2):
+
+    # Calcul de l'axe et de l'angle de rotation
+    axis = np.cross(v1, v2)
+    if np.linalg.norm(v1) * np.linalg.norm(v2) == 0:
+        angle = np.arccos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+    else:
+        angle = np.arccos(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
+
+    # # Création de la rotation à partir de l'axe et de l'angle
+    # r = R.from_rotvec(angle * axis)
+
+    # # Obtention du quaternion correspondant à la rotation
+    # q = r.as_quat()
+    q = tm.transformations.rotation_matrix(angle, axis)
+    return q

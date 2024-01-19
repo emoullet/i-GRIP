@@ -2,16 +2,18 @@
 
 import argparse
 import threading
-from i_grip import HandDetectors as hd
-from i_grip import Object2DDetectors as o2d
-from i_grip import ObjectPoseEstimators as ope
-from i_grip import Scene as sc
-from i_grip.utils import kill_gpu_processes
 import torch
 import gc
 import os
 import cv2
-import numpy as np
+
+from i_grip import HandDetectors2 as hd
+from i_grip import Object2DDetectors as o2d
+from i_grip import ObjectPoseEstimators as ope
+from i_grip import Scene2 as sc
+from i_grip import Plotters as pl
+from i_grip.utils import kill_gpu_processes
+
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 def report_gpu():
    print(torch.cuda.list_gpu_processes())
@@ -19,11 +21,14 @@ def report_gpu():
    print(torch.cuda.memory_snapshot())
    torch.cuda.empty_cache()
 
+
 class GraspingDetector:
     def __init__(self, ) -> None:
         dataset = "ycbv"
         self.hand_detector = hd.HybridOAKMediapipeDetector()
         cam_data = self.hand_detector.get_device_data()
+        plotter = pl.NBPlot()
+        # plotter = None
         self.object_detector = o2d.get_object_detector(dataset,
                                                        cam_data)
         self.object_pose_estimator = ope.get_pose_estimator(dataset,
@@ -31,11 +36,12 @@ class GraspingDetector:
                                                             use_tracking = True,
                                                             fuse_detections=False)
         self.scene = sc.LiveScene(cam_data,
-                              name = 'Full tracking')
+                              name = 'Full tracking', plotter = plotter)
         self.object_detections = None
         self.is_hands= False
         self.img_for_objects = None
-
+        
+        
     def estimate_objects_task(self, start_event, estimate_event):
         while self.hand_detector.isOn():
             start_flag = start_event.wait(1)
@@ -62,13 +68,15 @@ class GraspingDetector:
 
     def run(self):
         print(self.__dict__)
-        self.hand_detector.start()
         print('start')
+        self.hand_detector.start()
         start_event = threading.Event()
         detect_event = threading.Event()
         estimate_event = threading.Event()
         self.t_obj_d = threading.Thread(target=self.detect_objects_task, args=(start_event, detect_event,estimate_event,))
         self.t_obj_e = threading.Thread(target=self.estimate_objects_task, args=(start_event, estimate_event,))
+        # self.t_plot = threading.Thread(target=self.plot_task)
+        # self.t_plot.start()
         self.t_obj_d.start()
         self.t_obj_e.start()
         started = True
@@ -77,6 +85,7 @@ class GraspingDetector:
         obj_path = './YCBV_test_pictures/YCBV.png'
         obj_img = cv2.imread(obj_path)
         while self.hand_detector.isOn():
+            # pl.plot()
             k = cv2.waitKey(2)
             success, img = self.hand_detector.next_frame()
             if not success:
@@ -84,11 +93,11 @@ class GraspingDetector:
                 continue     
             else:
                 img_for_hands = img.copy()
-                cv2.cvtColor(img_for_hands, cv2.COLOR_RGB2BGR, img_for_hands)
+                img_for_hands = cv2.cvtColor(img_for_hands, cv2.COLOR_RGB2BGR)
                 img.flags.writeable = False
                 if estimate_event.is_set() or detect_event.is_set():
                     self.img_for_objects = img.copy()
-                    cv2.cvtColor(self.img_for_objects, cv2.COLOR_RGB2BGR, self.img_for_objects)
+                    self.img_for_objects = cv2.cvtColor(self.img_for_objects, cv2.COLOR_RGB2BGR)
                     self.img_for_objects.flags.writeable = False
                 if started:
                     start_event.set()
@@ -114,8 +123,8 @@ class GraspingDetector:
                 gpu_memory_reserved_mb = gpu_memory_reserved / 1024 / 1024
 
 
-                print(f"GPU Memory Used: {gpu_memory_used_mb:.2f} MB")
-                print(f"GPU Memory Reserved: {gpu_memory_reserved_mb:.2f} MB")
+                # print(f"GPU Memory Used: {gpu_memory_used_mb:.2f} MB")
+                # print(f"GPU Memory Reserved: {gpu_memory_reserved_mb:.2f} MB")
                 
             if k == 32:
                 print('DETEEEEEEEEEEEEEEEEEECT')
@@ -138,8 +147,8 @@ class GraspingDetector:
         self.object_pose_estimator.stop()
         exit()
 
-
-        
+    # return ax
+    # return ax
 
 if __name__ == '__main__':
     
@@ -159,6 +168,7 @@ if __name__ == '__main__':
     #     import cosypose
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     
+    print('start')
     report_gpu()
     kill_gpu_processes()
     i_grip = GraspingDetector()
