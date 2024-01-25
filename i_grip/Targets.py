@@ -7,10 +7,11 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
 class DataWindow:
-    def __init__(self, size:int) -> None:
+    def __init__(self, size:int, label:str) -> None:
         self.size = size # nb iterations or time limit ?
         self.data = list()
         self.nb_samples = 0
+        self.label = label
     
     def queue(self, new_data):
         self.data.append(new_data)
@@ -20,8 +21,8 @@ class DataWindow:
             self.nb_samples+=1
             
 class HandConeImpactsWindow(DataWindow):
-    def __init__(self, size: int) -> None:
-        super().__init__(size)
+    def __init__(self, size: int, label:str) -> None:
+        super().__init__(size, label)
         self.nb_impacts = 0
 
     # def mean(self):
@@ -64,27 +65,36 @@ class HandConeImpactsWindow(DataWindow):
         return self.nb_impacts
     
 class RealTimeWindow(DataWindow):
-    def __init__(self, size: int) -> None:
-        super().__init__(size)
+    def __init__(self, size: int, label:str) -> None:
+        print('new RealTimeWindow', label)
+        super().__init__(size, label)
         self.nb_samples = 0
         self.timestamps = []
         self.poly_coeffs = None
         self.der_poly_coeffs = None
-        self.der_data = None
+        self.der_data = []
         self.interpolated_data = []
-        self.distance_derivative = 0
         self.extrapolated_data = []
+        self.last_timestamp = 0
     
-    def queue(self, new_data:tuple):
+    def queue(self, new_data:tuple, time_type = 'elapsed'):
+        
         self.data.append(new_data[0])
-        self.timestamps.append(new_data[1])
-        self.timestamps = [t-self.timestamps[-1] for t in self.timestamps]
+        if time_type == 'elapsed':
+            self.timestamps.append(new_data[1])
+            self.timestamps = [t-self.timestamps[-1] for t in self.timestamps]
+        else:
+            dt = new_data[1] - self.last_timestamp
+            self.timestamps = [t- dt for t in self.timestamps]
+            self.timestamps.append(0)
+            self.last_timestamp = new_data[1]
+            
         if len(self.data)>= self.size:
             del self.data[0]
             del self.timestamps[0]
         else:
             self.nb_samples+=1
-    
+        
     def interpolate(self):
         # compute polynomial fit of data as a function of timestamps
         if len(self.data) < 8:
@@ -99,7 +109,7 @@ class RealTimeWindow(DataWindow):
     def differentiate(self):
         # use self.poly_coeffs to compute derivative of data
         if self.poly_coeffs is None:
-            print('No polynomial fit found, please use interpolate() before trying to differentiate()')
+            # print('No polynomial fit found, please use interpolate() before trying to differentiate()')
             return None
         else:
             self.der_poly_coeffs = np.polynomial.polynomial.polyder(self.poly_coeffs)
@@ -115,55 +125,74 @@ class RealTimeWindow(DataWindow):
         else:
             self.extrapolated_timestamps = np.arange(0, 0.3, 0.01)
             self.extrapolated_data = np.polynomial.polynomial.polyval(self.extrapolated_timestamps, self.poly_coeffs)
-        
-    def get_mean_derivative(self):
+    
+    def analyse(self):
         self.interpolate()
+        self.extrapolate()
         self.differentiate()
+        pass
+        
+    def get_mean_derivative(self, sub_window_size = 5):
         if self.der_data is None:
-            print('No derivative found, please use differentiate() before trying to get_mean_derivative()')
+            # print('No derivative found, please use differentiate() before trying to get_mean_derivative()')
             return None
         else:
-            return np.mean(self.der_data)
+            return np.mean(self.der_data[-sub_window_size:])
     
     def get_zero_time(self):
         # compute time when distance is zero
-        print(f'get_zero_time: {self.poly_coeffs}')
-        self.interpolate()
-        self.extrapolate()
+        # print(f'get_zero_time: {self.poly_coeffs}')
         if self.poly_coeffs is None:
-            print('No polynomial fit found, please use interpolate() before trying to get_zero_time()')
-            return None
+            # print('No polynomial fit found, please use interpolate() before trying to get_zero_time()')
+            return 0
         else:
             roots = np.roots(self.poly_coeffs)
-            print(f'roots: {roots}')
+            # print(f'roots: {roots}')
             #test if roots are real and positive
             good_roots = [root for root in roots if root.imag == 0 and root.real > 0]
-            print(f'good_roots: {good_roots}')
+            # print(f'good_roots: {good_roots}')
             if len(good_roots) == 0:
                 zero_time = 0
             else:
                 zero_time = good_roots[0]
-            print('zero_time', zero_time)
+            # print('zero_time', zero_time)
             return zero_time
     
+    def get_zero_time_explore(self):
+        if self.poly_coeffs is None:
+            # print('No polynomial fit found, please use interpolate() before trying to get_zero_time()')
+            return 0
+        #extrapolate to find time when distance is zero
+        extrapolated_timestamps = np.arange(0, 2, 0.01)
+        extrapolated_data = np.polynomial.polynomial.polyval(extrapolated_timestamps, self.poly_coeffs)
+        # Find index where values switch sign in extrapolated_data
+        sign_switch_indices = np.where(np.diff(np.sign(extrapolated_data)))[0]
+        if len(sign_switch_indices) >0:
+            zero_time = extrapolated_timestamps[sign_switch_indices[0]]
+        else:
+            zero_time = 0
+        return zero_time
     
 class TargetDetector:
-    def __init__(self, hand_label, hand_color, window_size = 100, plotter = None) -> None:
+    
+    _METRICS_COLORS = ['brown', 'grey', 'black']
+    def __init__(self, hand_label, hand_color, window_size = 20, plotter = None) -> None:
         self.window_size = window_size
         self.potential_targets:dict(Target) = {}
+        self.label = hand_label+'_target_detector'
         self.hand_label = hand_label
         self.plotter = plotter
         self.hand_color = hand_color 
-        self.target_from_distance_window = RealTimeWindow(window_size)
-        self.target_from_impacts_window = RealTimeWindow(window_size)
-        self.target_from_distance_derivative_window = RealTimeWindow(window_size)
+        self.target_from_distance_window = RealTimeWindow(window_size, self.hand_label+'_target_from_distance')
+        self.target_from_impacts_window = RealTimeWindow(window_size, self.hand_label+'_target_from_impacts')
+        self.target_from_distance_derivative_window = RealTimeWindow(window_size, self.hand_label+'_target_from_distance_derivative')
         # self.derivative_min_cutoff = derivative_min_cutoff
         # self.derivative_beta = derivative_beta
         # self.derivative_derivate_cutoff = derivative_derivate_cutoff
         #create a list of plotters for each target
     
     def new_target(self, obj:ob.RigidObject):
-        self.potential_targets[obj.label] = Target(obj)
+        self.potential_targets[obj.label] = Target(obj, hand_label=self.hand_label, index = len(self.potential_targets)+1)
         
     def poke_target(self, obj:ob.RigidObject):
         if not obj.label in self.potential_targets:
@@ -175,8 +204,8 @@ class TargetDetector:
         #print('impacts', impacts)
         if label in self.potential_targets:
             self.potential_targets[label].new_impacts(impacts, relative_hand_pos, elapsed) 
-        elif len(impacts)>0:
-            self.potential_targets[label] = Target(obj, impacts, relative_hand_pos)
+        # elif len(impacts)>0:
+        #     self.potential_targets[label] = Target(obj, impacts, relative_hand_pos, hand_label=self.hand_label)
             
     def update_distance_to(self, obj:ob.RigidObject, new_distance, elapsed):
         # print(f'update distance from {self.hand_label} to {obj.label} {new_distance} {elapsed}')
@@ -185,77 +214,49 @@ class TargetDetector:
             self.new_target(obj)
         self.potential_targets[label].update_distance(new_distance, elapsed)
         
-        
-    
-    def get_most_probable_target(self):
+    def get_most_probable_target(self, timestamp):
         for label,  target in self.potential_targets.items():
+            # print(f'analyse target {label}')
             target.analyse()
-            self.send_plots(label)
+            # print(f'send plots for target {label}')
+            # self.send_plots(label)
+            if self.plotter is not None:
+                to_plots = target.get_plots()
+                for to_plot in to_plots:
+                    # to_plot['label'] = label
+                    # to_plot['color'] = self.hand_color
+                    # to_plot['time'] = timestamp
+                    self.plotter.plot(to_plot)
+                
         target_from_impacts, target_from_impacts_index = self.get_most_probable_target_from_impacts()
-        # target_from_distance, target_from_distance_index = self.get_most_probable_target_from_distance()
-        # target_from_distance_derivative, target_from_distance_derivative_index = self.get_most_probable_target_from_distance_derivative()
+        self.target_from_impacts_window.queue( (target_from_impacts_index, timestamp) )
+        
+        target_from_distance, target_from_distance_index = self.get_most_probable_target_from_distance()
+        self.target_from_distance_window.queue( (target_from_distance_index, timestamp))
+        print(f'target_from_distance_index from {self.hand_label}: {target_from_distance_index}')
+        target_from_distance_derivative, target_from_distance_derivative_index = self.get_most_probable_target_from_distance_derivative()
+        self.target_from_distance_derivative_window.queue( (target_from_distance_derivative_index, timestamp) )
+        
+        self.send_plots()
+        
         most_probable_target = target_from_impacts
         
         return most_probable_target, self.potential_targets
     
-    def send_plots(self, label):
-        
-        if self.plotter is not None:
-            t = time.time()
-            to_plot = dict(color = self.hand_color,
-                           label = self.hand_label, 
-                           x = self.potential_targets[label].distance_window.timestamps, 
-                           y = self.potential_targets[label].distance_window.data, 
-                           plot_marker = 'o', 
-                           time = t, 
-                           plot_type='',
-                           plot_target = 'Distance')
-            self.plotter.plot(to_plot)
-            
-            to_plot = dict(color = self.hand_color,
-                           label = self.hand_label,
-                           x = self.potential_targets[label].distance_window.timestamps,
-                           y = self.potential_targets[label].distance_window.interpolated_data,
-                           plot_marker = '-',
-                           time = t,
-                           plot_type='_interpolated',
-                           plot_target = 'Distance')
-            self.plotter.plot(to_plot)
-            
-            to_plot = dict(color = self.hand_color,
-                           label = self.hand_label,
-                           x = self.potential_targets[label].distance_window.extrapolated_timestamps,
-                           y = self.potential_targets[label].distance_window.extrapolated_data,
-                           plot_marker = '--',
-                           time = t, 
-                           plot_type='_extrapolated',
-                           plot_target = 'Distance')
-            self.plotter.plot(to_plot)
-            
-            to_plot = dict(color = self.hand_color,
-                           label = self.hand_label, 
-                           x = self.potential_targets[label].time_to_target_distance_window.timestamps, 
-                           y = self.potential_targets[label].time_to_target_distance_window.data, 
-                           plot_marker = 'o', 
-                           time = t, 
-                           plot_type='',
-                           plot_target = 'Time to impact')
-            self.plotter.plot(to_plot)
-    
     def get_most_probable_target_from_impacts(self):
-        target_index = 0   
         if self.potential_targets:
             n_impacts = {}
             n_tot = 0
             to_del_keys=[]
             for lab, target in self.potential_targets.items():
                 n_impacts[lab] = target.projected_collison_window.get_nb_impacts()
-                if n_impacts[lab]<=0:
-                    to_del_keys.append(lab)
+                # if n_impacts[lab]<=0:
+                #     to_del_keys.append(lab)
                 n_tot +=n_impacts[lab]
 
-            for key in to_del_keys:
-                del self.potential_targets[key]
+            # for key in to_del_keys:
+            #     print(f'delete target {key}')
+            #     del self.potential_targets[key]
                 
             if n_tot == 0:
                 most_probable_target =  None                
@@ -263,41 +264,43 @@ class TargetDetector:
                 for lab in self.potential_targets:
                     self.potential_targets[lab].set_impact_ratio(n_impacts[lab]/n_tot)
                 max_ratio_label = max(n_impacts, key = n_impacts.get)
-                for i, lab in enumerate(n_impacts):
-                    if lab == max_ratio_label:
-                        target_index = i
                 most_probable_target = self.potential_targets[max_ratio_label]
         else:
             most_probable_target =  None
-        
-        return most_probable_target, target_index   
+        if most_probable_target is not None:
+            return most_probable_target, most_probable_target.get_index()
+        else:
+            return None, 0
     
     def get_most_probable_target_from_distance_derivative(self):
-        target_index = 0
         most_probable_target = None
-        if self.potential_targets:
-            min_distance_derivative = 0
-            for i, target in enumerate(self.potential_targets):
+        if self.potential_targets.values():
+            max_distance_derivative = 0
+            for target in self.potential_targets.values():
                 dist_der = target.get_mean_distance_derivative()   
                 if dist_der is not None:
-                    if min_distance_derivative == 0 or dist_der < min_distance_derivative:
-                        min_distance_derivative = dist_der
+                    if max_distance_derivative == 0 or dist_der > max_distance_derivative:
+                        max_distance_derivative = dist_der
                         most_probable_target = target
-                        target_index = i
-        return most_probable_target, target_index
+        if most_probable_target is not None:
+            return most_probable_target, most_probable_target.get_index()
+        else:
+            return None, 0   
 
     def get_most_probable_target_from_distance(self):
-        target_index =0
         most_probable_target = None
-        if self.potential_targets:
-            min_distance = 0
-            for i, target in enumerate(self.potential_targets):
-                dist = target.distance_window.data[-1]
-                if min_distance == 0 or dist < min_distance:
+        if self.potential_targets.values():
+            min_distance = 999999999999
+            for target in self.potential_targets.values():
+                dist = target.get_distance_to_hand()
+                if min_distance == 999999999999 or dist < min_distance:
                     min_distance = dist
                     most_probable_target = target
-                    target_index = i
-        return most_probable_target, target_index
+            print(f'min_distance: {min_distance} from {self.hand_label} to {most_probable_target}')
+        if most_probable_target is not None:
+            return most_probable_target, most_probable_target.get_index()
+        else:
+            return None, 0
                 
 
        #def set_hand_pos_vel(self, hand_pos, hand_vel):
@@ -308,21 +311,70 @@ class TargetDetector:
     #    for tar in self.potential_targets:
     #         """
 
+    def send_plots(self):
+        
+        if self.plotter is not None:
+            t = time.time()
+            to_plot_target_from_distance = dict(color = TargetDetector._METRICS_COLORS[0],
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.target_from_distance_window.timestamps, 
+                            y = self.target_from_distance_window.data, 
+                            plot_marker = 's', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Targets',
+                            metric_label = 'Distance')
+            to_plot_target_from_distance_derivative = dict(color = TargetDetector._METRICS_COLORS[1],
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.target_from_distance_derivative_window.timestamps, 
+                            y = self.target_from_distance_derivative_window.data, 
+                            plot_marker = '*', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Targets',
+                            metric_label = 'Distance derivative')
+            to_plot_target_from_impacts = dict(color = TargetDetector._METRICS_COLORS[2],
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.target_from_impacts_window.timestamps, 
+                            y = self.target_from_impacts_window.data, 
+                            plot_marker = '^', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Targets',
+                            metric_label = 'Impacts')
+            to_plots = [to_plot_target_from_distance, to_plot_target_from_distance_derivative, to_plot_target_from_impacts]
+            for to_plot in to_plots:
+                self.plotter.plot(to_plot)
+            
+    
 class Target:
-    def __init__(self, obj:ob.RigidObject, impacts=None,  relative_hand_pos=None,  window_size = 10) -> None:
+    
+    _TARGETS_COLORS = ['green',  'orange', 'purple', 'pink', 'brown', 'grey', 'black']
+    
+    def __init__(self, obj:ob.RigidObject, hand_label = None, impacts=None,  relative_hand_pos=None,  window_size = 20, index = 0) -> None:
+        self.index = index
+        self.color = Target._TARGETS_COLORS[self.index]
         self.object = obj
-        self.label = obj.label
+        self.obj_label = obj.label
+        self.hand_label = hand_label
+        self.label = self.obj_label + '_from_' + self.hand_label
         self.window_size = window_size
-        self.projected_collison_window = HandConeImpactsWindow(window_size)
-        self.distance_window = RealTimeWindow(window_size)
-        self.time_to_target_distance_window = RealTimeWindow(2*window_size)
-        self.time_to_target_impacts_window = RealTimeWindow(2*window_size)
-        print(f'POTENTIAL TARGET {self.label}')
+        
+        self.projected_collison_window = HandConeImpactsWindow(window_size, self.label+'_projected impacts')
+        self.distance_window = RealTimeWindow(window_size, self.label+'_distance')
+        self.time_to_target_distance_window = RealTimeWindow(2*window_size, self.label+'_time to target distance')
+        self.time_to_target_impacts_window = RealTimeWindow(2*window_size, self.label+'_time to target impacts')
+        self.distance_mean_derivative_window = RealTimeWindow(2*window_size, self.label+'_mean derivative')
+        
         self.ratio=0
-        self.distance_derivative = 0
-        self.grip = 'None'
+        self.distance_mean_derivative = 0
         self.time_before_impact_distance = 0
         self.time_before_impact_zone = 0
+        self.distance_to_hand = 0
+        self.grip = 'None'
         if not (impacts is None or relative_hand_pos is None):
             self.projected_collison_window.queue(impacts)
             self.predicted_impact_zone = Position(self.projected_collison_window.mean())
@@ -334,22 +386,11 @@ class Target:
             self.distance_to_hand = None
             self.relative_hand_pos = None
         self.elapsed = 0
-        # create a plotter for this target
-        
-    #     self.plot= plt.figure()
-    #     self.ax = self.plot.add_subplot()
-    #     self.plot.title = 'Distance to hand'
-    #     self.plotter =animation.FuncAnimation(plt.figure(), self.update_plot, interval=30)
-    #     self.plot.show()
-    
-    # def update_plot(self):
-    #     self.ax.clear()
-    #     self.ax.plot(self.distance_window.timestamps, self.distance_window.data)
-    #     self.ax.plot(self.distance_window.timestamps, self.distance_window.interpolated_data)
-    # def add_impacts(self, impacts):
     
     def update_distance(self, new_distance, elapsed):
-        self.distance_window.queue((new_distance, elapsed))
+        self.distance_to_hand = new_distance
+        # print('label', self.obj_label, 'new_distance', new_distance, 'elapsed', elapsed)
+        self.distance_window.queue((new_distance, elapsed), time_type='elapsed')
 
     def new_impacts(self, impacts, new_relative_hand_pos, elapsed):        
         if elapsed != 0:
@@ -372,24 +413,31 @@ class Target:
                 if distance_der !=0:
                     #self.time_before_impact = new_distance_to_hand
                     self.time_before_impact_zone = new_distance_to_hand/distance_der
-                    self.time_to_target_impacts_window.queue((self.time_before_impact_zone, self.elapsed))
+                    self.time_to_target_impacts_window.queue((self.time_before_impact_zone, self.elapsed), time_type='elapsed')
                 self.distance_derivative = distance_der
             self.distance_to_hand = new_distance_to_hand
             
     def compute_time_before_impact_distance(self):
-        self.time_before_impact_distance = self.distance_window.get_zero_time()
-        self.time_to_target_distance_window.queue((self.time_before_impact_distance, self.elapsed))
+        self.time_before_impact_distance = self.distance_window.get_zero_time_explore()
+        self.time_to_target_distance_window.queue((self.time_before_impact_distance, self.elapsed), time_type='elapsed')
         #print('new_distance_to_hand',new_distance_to_hand)
         # print('time to impact', int(self.time_before_impact ), 'ms')
     
     def analyse(self):
+        self.distance_window.analyse()
+        self.time_to_target_distance_window.analyse()
+        self.time_to_target_impacts_window.analyse()
         self.compute_time_before_impact_distance()
         self.compute_time_before_impact_zone()
-        self.distance_derivative = self.distance_window.get_mean_derivative()
+        self.distance_mean_derivative = self.distance_window.get_mean_derivative()
+        self.distance_mean_derivative_window.queue((self.distance_mean_derivative, self.elapsed), time_type='elapsed')
         self.find_grip()
     
+    def get_distance_to_hand(self):
+        return self.distance_to_hand
+    
     def get_mean_distance_derivative(self):
-        return self.distance_derivative
+        return self.distance_mean_derivative
 
     def __str__(self) -> str:
         out = 'Target: '+self.object.label + ' - nb impacts: ' + str(self.projected_collison_window.nb_impacts) + ' - ratio: ' + str(self.ratio)
@@ -400,9 +448,9 @@ class Target:
 
     def get_time_of_impact(self, unit = 'ms'):
         if unit == 'ms':
-            return int(self.time_before_impact*1000)
+            return int(self.time_before_impact_zone*1000)
         if unit == 's':
-            return int(self.time_before_impact)
+            return int(self.time_before_impact_zone)
     
     def find_grip(self):
         if abs(self.predicted_impact_zone.v[0])>20:
@@ -414,8 +462,76 @@ class Target:
         return self.grip
     
     def get_info(self):
-        return self.object.name, self.grip, self.time_before_impact, self.ratio
+        return self.object.name, self.grip, self.time_before_impact_zone, self.ratio
 
+    def get_plots(self):      
+        
+        t = time.time()
+        to_plots = []
+        to_plot_distance = dict(color = self.color,
+                        label = self.label,
+                        hand_label = self.hand_label, 
+                        object_label = self.obj_label,
+                        x = self.distance_window.timestamps, 
+                        y = self.distance_window.data, 
+                        plot_marker = 'o', 
+                        time = t, 
+                        plot_type='',
+                        plot_target = 'Distance')
+        to_plots.append(to_plot_distance)
+        
+        to_plot_distance_interpolated = dict(color = self.color,
+                        label = self.label,
+                        hand_label = self.hand_label,
+                        object_label = self.obj_label,
+                        x = self.distance_window.timestamps,
+                        y = self.distance_window.interpolated_data,
+                        plot_marker = '-',
+                        time = t,
+                        plot_type='_interpolated',
+                        plot_target = 'Distance')
+        to_plots.append(to_plot_distance_interpolated)
+        
+        to_plot_distance_extrapolated = dict(color = self.color,
+                        label = self.label,
+                        hand_label = self.hand_label,
+                        object_label = self.obj_label,
+                        x = self.distance_window.extrapolated_timestamps,
+                        y = self.distance_window.extrapolated_data,
+                        plot_marker = '--',
+                        time = t, 
+                        plot_type='_extrapolated',
+                        plot_target = 'Distance')
+        to_plots.append(to_plot_distance_extrapolated)
+        
+        to_plot_time_to_target_distance = dict(color = self.color,
+                        label = self.label,
+                        hand_label = self.hand_label, 
+                        object_label = self.obj_label,
+                        x = self.time_to_target_distance_window.timestamps, 
+                        y = self.time_to_target_distance_window.data, 
+                        plot_marker = 'o', 
+                        time = t, 
+                        plot_type='',
+                        plot_target = 'Time to impact')
+        to_plots.append(to_plot_time_to_target_distance)
+        
+        to_plot_mean_derivative = dict(color = self.color,
+                        label = self.label,
+                        hand_label = self.hand_label, 
+                        object_label = self.obj_label,
+                        x = self.distance_mean_derivative_window.timestamps, 
+                        y = self.distance_mean_derivative_window.data, 
+                        plot_marker = 'o', 
+                        time = t, 
+                        plot_type='',
+                        plot_target = 'Distance derivative')
+        to_plots.append(to_plot_mean_derivative)
+        return to_plots
+    
+    def get_index(self):
+        return self.index
+    
 class GripSelector:
     def __init__(self) -> None:
         pass

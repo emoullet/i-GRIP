@@ -160,6 +160,7 @@ class Pose:
 class Bbox:
 
     _IMAGE_RESOLUTION = (1280, 720)
+    _IMAGE_RESOLUTION = [640., 480.]
     
     @classmethod
     def set_image_resolution(cls, resolution):

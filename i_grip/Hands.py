@@ -263,7 +263,7 @@ class GraspingHand(Entity):
             self.plot_color = 'blue'
             self.future_color = [0,255,255,255]
     
-    def define_velocity_cone(self,cone_max_length = 500, cone_min_length = 50, vmin=30, vmax=200, cone_max_diam = 200,cone_min_diam = 50, n_layers=3):
+    def define_velocity_cone(self,cone_max_length = 500, cone_min_length = 50, vmin=30, vmax=200, cone_max_diam = 200,cone_min_diam = 50, n_layers=2):
         self.cone_angle = np.pi/8
         self.n_layers = n_layers
         self.cone_lenghts_spline = spline(vmin,vmax, cone_min_length, cone_max_length)
@@ -348,13 +348,16 @@ class GraspingHand(Entity):
         self.impact_locations_list = {}
         ray_origins_list = []
         ray_directions_list = []
-        i = 0
+        i=0
         for point in self.future_points:
+        # for point in self.future_points[:-1]:
             weight = 1/(i+1)
             if i==0:
                 prev_point = point
             else:
                 vdir = (point - prev_point)
+                # next_point= self.future_points[i+1]
+                # vdir = (next_point - point)
                 svel = np.linalg.norm(vdir)
                 vdir = vdir/svel
                 svel = svel/0.01
@@ -363,11 +366,12 @@ class GraspingHand(Entity):
             ray_origins_list.append(ray_origins)
             ray_directions_list.append(ray_directions)
             i+=1
-        self.ray_origins = np.vstack(ray_origins_list)
-        self.ray_directions = np.vstack(ray_directions_list)
-        self.ray_visualize =  tm.load_path(np.hstack((
-            self.ray_origins,
-            self.ray_origins + self.ray_directions)).reshape(-1, 2, 3))    
+        if len(ray_origins_list)>0:
+            self.ray_origins = np.vstack(ray_origins_list)
+            self.ray_directions = np.vstack(ray_directions_list)
+            self.ray_visualize =  tm.load_path(np.hstack((
+                self.ray_origins,
+                self.ray_origins + self.ray_directions)).reshape(-1, 2, 3))    
     
     def get_rays_from_point(self, point, vdir, svel):
         cone_len = self.cone_lenghts_spline(svel)
@@ -398,10 +402,16 @@ class GraspingHand(Entity):
         else:
             # print(f'checking target for {obj.label}')
             new = True
+            
             self.target_detector.poke_target(obj)
+            
             inv_trans = obj.inv_mesh_transform
             self.hand_pos_obj_frame[obj.label] = (inv_trans@self.mesh_position.ve)[:3]
+            
+            self.get_distance_to(obj)
+            
             ray_origins_obj_frame = []
+            self.impact_locations[obj.label] = []
             for point in self.future_points:
                 #expand  point to a 4d vector adding 1 as the last component
                 point = np.append(point, 1)
@@ -417,7 +427,6 @@ class GraspingHand(Entity):
                                                                                 multiple_hits=False)
             except:
                 self.impact_locations[obj.label] = []
-            self.get_distance_to(obj)
             self.target_detector.new_impacts(obj, self.impact_locations[obj.label], self.hand_pos_obj_frame[obj.label], self.elapsed)
         # obj.distance_to(self)
         return new, self.impact_locations[obj.label]
@@ -517,7 +526,7 @@ class GraspingHand(Entity):
     def get_distance_to(self, obj):
         (closest_points,
         distances,
-        triangle_id) = obj.mesh.nearest.on_surface(self.mesh_position.v.reshape(1,3))
+        triangle_id) = obj.mesh.nearest.on_surface(self.hand_pos_obj_frame[obj.label].reshape(1,3))
         self.target_detector.update_distance_to(obj, distances[0], self.elapsed)
     
     def get_mesh_position(self):
@@ -526,13 +535,20 @@ class GraspingHand(Entity):
     def get_trajectory_points(self):
         return self.state.trajectory.get_xyz_data()
     
-    def get_future_trajectory_points(self, timespand = 1):
-        self.future_points = self.state.get_future_trajectory_points(timespand)
+    def get_future_trajectory_points(self):
+        self.future_points = self.state.get_future_trajectory_points()
+        # if not hasattr(self, 'dotruc'):
+        #     self.dotruc = 0
+        # if self.dotruc <20:            
+        #     self.future_points = self.state.get_future_trajectory_points(timespand)
+        #     self.dotruc +=1
+        # print(f'doa truc : {self.dotruc}')
+        # self.future_points = [self.mesh_position.v + np.array([10*i,2*i**2,0*i]) for i in range(25)]
         return self.future_points
     
     
-    def fetch_targets(self, timestamp = None):
-        self.most_probable_target, targets = self.target_detector.get_most_probable_target()
+    def fetch_targets(self):
+        self.most_probable_target, targets = self.target_detector.get_most_probable_target(self.elapsed)
         # print(f'{self.label} hand most probable target : {self.most_probable_target}')
         # if self.most_probable_target is not None:
         #     self.targets_data.loc[len(self.targets_data)] = [timestamp]+list(self.most_probable_target.get_info())
@@ -618,6 +634,7 @@ class GraspingHandState(State):
             self.normalized_landmarks_velocity_filtered = self.normalized_landmarks_velocity            
             self.filter_normalized_landmarks, self.filter_normalized_landmarks_velocity= Filter.both('normalized_landmarks')
             
+        self.future_points=[self.position_raw.v]
             
         if timestamp is None:
             self.last_timestamp = time.time()
@@ -714,6 +731,7 @@ class GraspingHandState(State):
         self.compute_velocity()
         if self.normalized_landmarks is not None:
             self.propagate_normalized_landmarks(elapsed)
+        self.compute_future_points()
         self.set_updated(False)
         self.set_propagated(True)
     
@@ -730,14 +748,16 @@ class GraspingHandState(State):
             self.position_raw = Position(extrapolated_position)
             self.trajectory.add(self, extrapolated=True)
             
-    def get_future_trajectory_points(self, timespand):
+    def compute_future_points(self, timespand = 1):
         timestamps = np.arange(self.last_timestamp, self.last_timestamp+timespand, 0.1)
-        res=[]
+        self.future_points=[]
         for timestamp in timestamps:
             future_point = self.trajectory.extrapolate(timestamp)
             # print(f'future_point : {future_point}')
-            res.append(future_point*np.array([-1,1,1]))
-        return res
+            self.future_points.append(future_point*np.array([-1,1,1]))
+            
+    def get_future_trajectory_points(self):
+        return self.future_points
     
     def apply_filter_position(self):
         self.position_filtered = Position(self.filter_position.apply(self.position_raw.v))

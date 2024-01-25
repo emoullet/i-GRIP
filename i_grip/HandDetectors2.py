@@ -30,7 +30,7 @@ class HybridOAKMediapipeDetector():
                  cam_params = None, 
                  device_id = None, 
                  fps=30., 
-                 resolution = _720P, 
+                 resolution = _480P, 
                  detect_hands = True, 
                  mediapipe_model_path = _MEDIAPIPE_MODEL_PATH, 
                  print_rgb_stereo_latency = False, 
@@ -310,7 +310,7 @@ class HybridOAKMediapipeDetector():
         if r_frame is not None:
             frame = r_frame.getCvFrame() 
             # cv2.imshow('raw_'+name, frame)
-            # frame = cv2.resize(frame, self.cam_data['resolution']) 
+            frame = cv2.resize(frame, self.cam_data['resolution']) 
             # frame=cv2.flip(frame,1)
             # print(frame.shape)
             cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)

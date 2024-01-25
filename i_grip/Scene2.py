@@ -233,15 +233,15 @@ class Scene :
     def update_meshes(self, scene):
         if self.run_scene_display:
             # print('update meshes')
-            self.update_hands_meshes(scene)
-            self.update_object_meshes(scene)
-            if self.detect_grasping:
-                self.check_all_targets(scene)
-                self.fetch_all_targets(timestamp=self.time_scene)
-            if self.show_trajectory:
-                self.update_trajectory_meshes(scene)
             if self.show_prediction:
                 self.predict_future_trajectory(scene)
+            self.update_hands_meshes(scene)
+            self.update_object_meshes(scene)
+            if self.show_trajectory:
+                self.update_trajectory_meshes(scene)
+            if self.detect_grasping:
+                self.check_all_targets(scene)
+                self.fetch_all_targets()
 
     def update_hands_meshes(self, scene):
         hands_to_delete = self.hands_to_delete.copy().keys()
@@ -250,15 +250,8 @@ class Scene :
         self.new_hand_meshes = []
         hands = self.hands.copy().items()
         
-        if len(hands_to_delete)>0:
-            print
-            print(f'scene geometry {scene.geometry}')
         for label in hands_to_delete:
             scene.delete_geometry(label)
-            print(f'delete hands {label}')
-        if len(hands_to_delete)>0:
-            print(f'scene geometry {scene.geometry}')
-        
         for i in range(len(new_hand_meshes)):
             new = new_hand_meshes.pop(0)
             scene.add_geometry(new['mesh'], geom_name = new['name'])
@@ -277,15 +270,8 @@ class Scene :
         self.new_object_meshes = []
         objects = self.objects.copy().items()
         
-        if len(objects_to_delete)>0:
-            print('avant delete')
-            print(f'scene geometry {scene.geometry}')   
         for label in objects_to_delete:
             scene.delete_geometry(label)
-            print(f'delete objects {label}')
-        if len(objects_to_delete)>0:
-            print('apres delete')
-            print(f'scene geometry {scene.geometry}')
             
         for i in range(len(new_object_meshes)):
             new = new_object_meshes.pop(0)
@@ -307,7 +293,7 @@ class Scene :
                     if new:
                         scene.delete_geometry(hand.label+obj.label+'ray_impacts')
                         if len(impacts_mesh_frame_locations)>0:
-                            print('impacts_mesh_frame_locations', impacts_mesh_frame_locations)
+                            # print('impacts_mesh_frame_locations', impacts_mesh_frame_locations)
                             impacts = tm.points.PointCloud(impacts_mesh_frame_locations, colors=hand.color)
                             # scene.add_geometry(impacts, geom_name=hand.label+'ray_impacts')
                             scene.add_geometry(impacts, geom_name=hand.label+obj.label+'ray_impacts',transform = obj.get_mesh_transform())
@@ -337,12 +323,12 @@ class Scene :
                 predicted_trajectory = tm.points.PointCloud(predicted_trajectory, colors=hand.future_color)
                 scene.add_geometry(predicted_trajectory, geom_name=hand.label+'future_trajectory')
     
-    def fetch_all_targets(self, timestamp = None):
+    def fetch_all_targets(self):
         self.targets = {}
         hands = self.hands.copy()
         objs = self.objects.copy()
         for hlabel, hand in hands.items():
-            self.targets[hlabel]= hand.fetch_targets(timestamp = timestamp)
+            self.targets[hlabel]= hand.fetch_targets()
     
         for olabel in objs:
             target_info = (False, None, None)
