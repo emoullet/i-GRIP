@@ -8,14 +8,15 @@ from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 
 from i_grip.utils2 import *
-from i_grip import HandDetectors2 as hd
+from i_grip import Hands3DDetectors as hd
 from i_grip.Targets import TargetDetector
 from i_grip.Objects import RigidObject
+# from i_grip.HandDetectors2 import HandPrediction
 
 
-from sklearn.linear_model import Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures, SplineTransformer
+# from sklearn.linear_model import Ridge
+# from sklearn.pipeline import make_pipeline
+# from sklearn.preprocessing import PolynomialFeatures, SplineTransformer
     
 class GraspingHandTrajectory(Trajectory):
     
@@ -236,6 +237,7 @@ class GraspingHand(Entity):
         self.update_mesh()
         
         self.target_detector = TargetDetector(self.label, self.plot_color, plotter=self.plotter)
+        self.target_detector.set_hand_absolute_position(self.mesh_position)
         self.most_probable_target = None
         self.targets_data = pd.DataFrame(columns = ['Timestamp', 'label', 'grip', 'time_before_impact','ratio'])
 
@@ -434,6 +436,8 @@ class GraspingHand(Entity):
             new = True
             
             self.target_detector.poke_target(obj)
+            self.target_detector.set_hand_absolute_position(self.mesh_position)
+            # self.target_detector.set_hand_scalar_velocity(self.state.scalar_velocity)
             
             inv_trans = obj.inv_mesh_transform
             self.hand_pos_obj_frame[obj_label] = (inv_trans@self.mesh_position.ve)[:3]
@@ -452,12 +456,12 @@ class GraspingHand(Entity):
             
             rot = inv_trans[:3,:3]
             ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in self.ray_directions])    
-            # try:
-            self.impact_locations[obj_label], _, _ = mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
+            try:
+                self.impact_locations[obj_label], _, _ = mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
                                                                             ray_directions=ray_directions_obj_frame,
                                                                             multiple_hits=False)
-            # except:
-            #     self.impact_locations[obj_label] = []
+            except:
+                self.impact_locations[obj_label] = []
             self.target_detector.new_impacts(obj_label, self.impact_locations[obj_label], self.hand_pos_obj_frame[obj_label], self.elapsed)
             
             #update target location
@@ -676,6 +680,7 @@ class GraspingHandState(State):
             self.trajectory = GraspingHandTrajectory.from_state(self, limit_size=20)
         else:
             self.trajectory = trajectory
+        self.extraplation_count = 0
         self.set_updated(True)
         self.set_propagated(False)
         
@@ -771,13 +776,18 @@ class GraspingHandState(State):
             self.position_raw = self.new_position
             self.trajectory.add(self)
             self.trajectory.fit(10)
+            self.extraplation_count = 0
             # print('was_updated')
-        else:
+        elif self.extrapolation_allowed():
             # print('was extrapolated')
             extrapolated_position = self.trajectory.extrapolate(self.last_timestamp)
             # print(f'extrapolated_position : {extrapolated_position}')
             self.position_raw = Position(extrapolated_position)
             self.trajectory.add(self, extrapolated=True)
+            self.extraplation_count += 1
+            
+    def extrapolation_allowed(self):
+        return self.extraplation_count < 5
             
     def compute_future_points_old(self, timespand=1):
         timestamps = np.arange(self.last_timestamp, self.last_timestamp+timespand, 0.1)

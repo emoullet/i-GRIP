@@ -1,10 +1,6 @@
 import numpy as np  
 from i_grip.utils2 import *
 from i_grip import Objects as ob
-import matplotlib
-# matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
 class DataWindow:
     def __init__(self, size:int, label:str) -> None:
@@ -183,29 +179,48 @@ class TargetDetector:
         self.hand_label = hand_label
         self.plotter = plotter
         self.hand_color = hand_color 
+        
         self.target_from_distance_window = RealTimeWindow(window_size, self.hand_label+'_target_from_distance')
         self.target_from_impacts_window = RealTimeWindow(window_size, self.hand_label+'_target_from_impacts')
         self.target_from_distance_derivative_window = RealTimeWindow(window_size, self.hand_label+'_target_from_distance_derivative')
+        
+        
+        self.hand_x_window = RealTimeWindow(20, self.hand_label+'_x')
+        self.hand_y_window = RealTimeWindow(20, self.hand_label+'_y')
+        self.hand_z_window = RealTimeWindow(20, self.hand_label+'_z')
+        
+        self.hand_scalar_velocity_window = RealTimeWindow(50, self.hand_label+'_hand_scalar_velocity')
+        
+        self.target_from_distance_confidence_window = RealTimeWindow(window_size, self.hand_label+'_target_from_distance_confidence')
+        self.target_from_impacts_confidence_window = RealTimeWindow(window_size, self.hand_label+'_target_from_impacts_confidence')
+        self.target_from_distance_derivative_confidence_window = RealTimeWindow(window_size, self.hand_label+'_target_from_distance_derivative_confidence')
+        
+        self.most_probable_target_window = RealTimeWindow(window_size, self.hand_label+'_most_probable_target')
+        
+        self.relative_distance_threshold = 0.1
+        self.hand_scalar_velocity = 0
         # self.derivative_min_cutoff = derivative_min_cutoff
         # self.derivative_beta = derivative_beta
         # self.derivative_derivate_cutoff = derivative_derivate_cutoff
         #create a list of plotters for each target
     
     def new_target(self, obj:ob.RigidObject):
-        self.potential_targets[obj.label] = Target(obj, hand_label=self.hand_label, index = len(self.potential_targets)+1)
+        self.potential_targets[obj.label] = Target(obj, hand_label=self.hand_label, index = len(self.potential_targets))
         
     def poke_target(self, obj:ob.RigidObject):
         if not obj.label in self.potential_targets:
             self.new_target(obj)
     
-    def new_impacts(self, obj:ob.RigidObject, impacts, relative_hand_pos, elapsed, weight = 1):
-        label = obj.label
+    def new_impacts(self, label, impacts, relative_hand_pos, elapsed, weight = 1):
         relative_hand_pos = Position(relative_hand_pos)
         #print('impacts', impacts)
         if label in self.potential_targets:
             self.potential_targets[label].new_impacts(impacts, relative_hand_pos, elapsed) 
         # elif len(impacts)>0:
-        #     self.potential_targets[label] = Target(obj, impacts, relative_hand_pos, hand_label=self.hand_label)
+        #     self.potential_targets[label] = Target(obj, impacts, relative_hand_pos, hand_label=self.hand_label)   
+        
+    def update_target_position(self, obj_label, obj_position):
+        self.potential_targets[obj_label].set_position(obj_position)
             
     def update_distance_to(self, obj:ob.RigidObject, new_distance, elapsed):
         # print(f'update distance from {self.hand_label} to {obj.label} {new_distance} {elapsed}')
@@ -227,24 +242,76 @@ class TargetDetector:
                     # to_plot['color'] = self.hand_color
                     # to_plot['time'] = timestamp
                     self.plotter.plot(to_plot)
-                
-        target_from_impacts, target_from_impacts_index = self.get_most_probable_target_from_impacts()
-        self.target_from_impacts_window.queue( (target_from_impacts_index, timestamp) )
+        self.hand_x_window.queue((self.hand_pos.x, timestamp))
+        self.hand_y_window.queue((self.hand_pos.y, timestamp))
+        self.hand_z_window.queue((self.hand_pos.z, timestamp))
         
-        target_from_distance, target_from_distance_index = self.get_most_probable_target_from_distance()
-        self.target_from_distance_window.queue( (target_from_distance_index, timestamp))
-        print(f'target_from_distance_index from {self.hand_label}: {target_from_distance_index}')
-        target_from_distance_derivative, target_from_distance_derivative_index = self.get_most_probable_target_from_distance_derivative()
-        self.target_from_distance_derivative_window.queue( (target_from_distance_derivative_index, timestamp) )
+        self.hand_x_window.analyse()
+        self.hand_y_window.analyse()
+        self.hand_z_window.analyse()
+        
+        hand_vx = self.hand_x_window.get_mean_derivative()
+        hand_vy = self.hand_y_window.get_mean_derivative()
+        hand_vz = self.hand_z_window.get_mean_derivative()
+        
+        self.hand_scalar_velocity  = np.sqrt(hand_vx**2 + hand_vy**2 + hand_vz**2)
+                
+        delta_visu = 0.1
+        
+        target_from_impacts, target_from_impacts_index, target_from_impacts_confidence = self.get_most_probable_target_from_impacts()
+        self.target_from_impacts_window.queue( (target_from_impacts_index+2*delta_visu, timestamp) )
+        self.target_from_impacts_confidence_window.queue( (target_from_impacts_confidence, timestamp) )
+        
+        target_from_distance, target_from_distance_index, target_from_distance_confidence = self.get_most_probable_target_from_distance()
+        self.target_from_distance_window.queue( (target_from_distance_index+delta_visu, timestamp))
+        self.target_from_distance_confidence_window.queue( (target_from_distance_confidence, timestamp) )
+        
+        target_from_distance_derivative, target_from_distance_derivative_index, target_from_distance_derivative_confidence = self.get_most_probable_target_from_distance_derivative()
+        self.target_from_distance_derivative_window.queue( (target_from_distance_derivative_index-delta_visu, timestamp) )
+        self.target_from_distance_derivative_confidence_window.queue( (target_from_distance_derivative_confidence, timestamp) )
+        
+        self.hand_scalar_velocity_window.queue((self.hand_scalar_velocity , timestamp))
         
         self.send_plots()
         
-        most_probable_target = target_from_impacts
+        if self.hand_scalar_velocity > 10:
+            if target_from_impacts is not None:
+                if target_from_impacts_confidence < target_from_distance_derivative_confidence:
+                    most_probable_target = target_from_distance_derivative
+                    most_probable_target_confidence = target_from_distance_derivative_confidence
+                    most_probable_target_index = target_from_distance_derivative_index
+                else:
+                    most_probable_target = target_from_impacts
+                    most_probable_target_confidence = target_from_impacts_confidence
+                    most_probable_target_index = target_from_impacts_index
+            else:
+                most_probable_target = target_from_distance_derivative
+                most_probable_target_confidence = target_from_distance_derivative_confidence
+                most_probable_target_index = target_from_distance_derivative_index
+        else:
+            most_probable_target = target_from_distance
+            most_probable_target_confidence = target_from_distance_confidence
+            most_probable_target_index = target_from_distance_index
+        
+        # if target_from_distance.get_distance_to_hand()<self.distance_threshold:
+        #     most_probable_target = target_from_distance
+        self.most_probable_target_window.queue((most_probable_target_index, timestamp))
         
         return most_probable_target, self.potential_targets
-    
+
+    def compute_minimum_distance_between_targets(self):
+        min_distance_between_targets = 999999999999
+        for label1, target1 in self.potential_targets.items():
+            for label2, target2 in self.potential_targets.items():
+                if label1 != label2:
+                    dist = Position.distance(target1.position, target2.position)
+                    if dist < min_distance_between_targets:
+                        min_distance_between_targets = dist
+        return min_distance_between_targets
+            
     def get_most_probable_target_from_impacts(self):
         if self.potential_targets:
+            confidence = 0
             n_impacts = {}
             n_tot = 0
             to_del_keys=[]
@@ -262,32 +329,38 @@ class TargetDetector:
                 most_probable_target =  None                
             else:
                 for lab in self.potential_targets:
-                    self.potential_targets[lab].set_impact_ratio(n_impacts[lab]/n_tot)
-                max_ratio_label = max(n_impacts, key = n_impacts.get)
-                most_probable_target = self.potential_targets[max_ratio_label]
+                    tar_confidence = n_impacts[lab]/n_tot
+                    self.potential_targets[lab].set_impact_ratio(tar_confidence)
+                    if tar_confidence > confidence:
+                        confidence = tar_confidence
+                        most_probable_target = self.potential_targets[lab]
         else:
             most_probable_target =  None
         if most_probable_target is not None:
-            return most_probable_target, most_probable_target.get_index()
+            return most_probable_target, most_probable_target.get_index(), confidence
         else:
-            return None, 0
+            return None, 0, 0
     
     def get_most_probable_target_from_distance_derivative(self):
+        confidence = 0
         most_probable_target = None
         if self.potential_targets.values():
-            max_distance_derivative = 0
+            min_distance_derivative = 0
             for target in self.potential_targets.values():
                 dist_der = target.get_mean_distance_derivative()   
                 if dist_der is not None:
-                    if max_distance_derivative == 0 or dist_der > max_distance_derivative:
-                        max_distance_derivative = dist_der
+                    if min_distance_derivative == 0 or dist_der < min_distance_derivative:
+                        min_distance_derivative = dist_der
                         most_probable_target = target
+            if self.hand_scalar_velocity != 0 and min_distance_derivative > 0 :
+                confidence = min_distance_derivative/self.hand_scalar_velocity
         if most_probable_target is not None:
-            return most_probable_target, most_probable_target.get_index()
+            return most_probable_target, most_probable_target.get_index(), confidence
         else:
-            return None, 0   
+            return None, 0, 0
 
     def get_most_probable_target_from_distance(self):
+        confidence = 1
         most_probable_target = None
         if self.potential_targets.values():
             min_distance = 999999999999
@@ -296,13 +369,21 @@ class TargetDetector:
                 if min_distance == 999999999999 or dist < min_distance:
                     min_distance = dist
                     most_probable_target = target
-            print(f'min_distance: {min_distance} from {self.hand_label} to {most_probable_target}')
+            min_distance_between_targets = self.compute_minimum_distance_between_targets()
+            if min_distance < self.relative_distance_threshold*min_distance_between_targets:
+                confidence = 1
+            elif min_distance > min_distance_between_targets:
+                confidence = 0
+            else:
+                confidence = 1 - (min_distance - self.relative_distance_threshold*min_distance_between_targets)/(min_distance_between_targets*(1-self.relative_distance_threshold))
         if most_probable_target is not None:
-            return most_probable_target, most_probable_target.get_index()
+            return most_probable_target, most_probable_target.get_index(), confidence
         else:
-            return None, 0
-                
-
+            return None, 0, 0
+    def set_hand_absolute_position(self, hand_pos):
+        self.hand_pos = hand_pos
+    def set_hand_scalar_velocity(self, hand_scalar_velocity):
+        self.hand_scalar_velocity = hand_scalar_velocity
        #def set_hand_pos_vel(self, hand_pos, hand_vel):
         #self.hand_pos = hand_pos
         #self.hand_vel = hand_vel
@@ -345,7 +426,62 @@ class TargetDetector:
                             plot_type='',
                             plot_target = 'Targets',
                             metric_label = 'Impacts')
-            to_plots = [to_plot_target_from_distance, to_plot_target_from_distance_derivative, to_plot_target_from_impacts]
+            
+            to_plot_most_probable_target = dict(color = self.hand_color,
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.most_probable_target_window.timestamps, 
+                            y = self.most_probable_target_window.data, 
+                            plot_marker = 'o', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Targets',
+                            metric_label = 'Most probable target')
+            
+            
+            to_plot_confidence_from_distance = dict(color = TargetDetector._METRICS_COLORS[0],
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.target_from_distance_confidence_window.timestamps, 
+                            y = self.target_from_distance_confidence_window.data, 
+                            plot_marker = 's', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Confidence',
+                            metric_label = 'Distance')
+            to_plot_confidence_from_distance_derivative = dict(color = TargetDetector._METRICS_COLORS[1],
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.target_from_distance_derivative_confidence_window.timestamps, 
+                            y = self.target_from_distance_derivative_confidence_window.data, 
+                            plot_marker = '*', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Confidence',
+                            metric_label = 'Distance derivative')
+            to_plot_confidence_from_impacts = dict(color = TargetDetector._METRICS_COLORS[2],
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.target_from_impacts_confidence_window.timestamps, 
+                            y = self.target_from_impacts_confidence_window.data, 
+                            plot_marker = '^', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Confidence',
+                            metric_label = 'Impacts')          
+            
+            to_plot_hand_scalar_velocity = dict(color = self.hand_color,
+                            label = self.label,
+                            hand_label = self.hand_label, 
+                            x = self.hand_scalar_velocity_window.timestamps, 
+                            y = self.hand_scalar_velocity_window.data, 
+                            plot_marker = '*', 
+                            time = t, 
+                            plot_type='',
+                            plot_target = 'Distance derivative',
+                            metric_label = 'Scalar velocity')  
+            
+            to_plots = [to_plot_target_from_distance, to_plot_target_from_distance_derivative, to_plot_target_from_impacts, to_plot_confidence_from_distance, to_plot_confidence_from_distance_derivative, to_plot_confidence_from_impacts, to_plot_hand_scalar_velocity, to_plot_most_probable_target]
             for to_plot in to_plots:
                 self.plotter.plot(to_plot)
             
@@ -354,20 +490,22 @@ class Target:
     
     _TARGETS_COLORS = ['green',  'orange', 'purple', 'pink', 'brown', 'grey', 'black']
     
-    def __init__(self, obj:ob.RigidObject, hand_label = None, impacts=None,  relative_hand_pos=None,  window_size = 20, index = 0) -> None:
-        self.index = index
-        self.color = Target._TARGETS_COLORS[self.index]
+    def __init__(self, obj:ob.RigidObject, hand_label = None, impacts=None,  relative_hand_pos=None, analysis_window_size=10, visu_window_size = 40, index = 0) -> None:
+        self.index = index+1
+        self.color = Target._TARGETS_COLORS[index]
         self.object = obj
-        self.obj_label = obj.label
+        self.obj_label = obj.name
         self.hand_label = hand_label
         self.label = self.obj_label + '_from_' + self.hand_label
-        self.window_size = window_size
+        self.window_size = visu_window_size
+        self.position = self.object.get_position()
         
-        self.projected_collison_window = HandConeImpactsWindow(window_size, self.label+'_projected impacts')
-        self.distance_window = RealTimeWindow(window_size, self.label+'_distance')
-        self.time_to_target_distance_window = RealTimeWindow(2*window_size, self.label+'_time to target distance')
-        self.time_to_target_impacts_window = RealTimeWindow(2*window_size, self.label+'_time to target impacts')
-        self.distance_mean_derivative_window = RealTimeWindow(2*window_size, self.label+'_mean derivative')
+        self.projected_collison_window = HandConeImpactsWindow(analysis_window_size, self.label+'_projected impacts')
+        self.distance_window = RealTimeWindow(20, self.label+'_distance')
+        self.time_to_target_distance_window = RealTimeWindow(visu_window_size, self.label+'_time to target distance')
+        self.time_to_target_impacts_window = RealTimeWindow(visu_window_size, self.label+'_time to target impacts')
+        self.distance_mean_derivative_window = RealTimeWindow(visu_window_size, self.label+'_mean derivative')
+        self.nb_impacts_window = RealTimeWindow(visu_window_size, self.label+'_nb impacts')
         
         self.ratio=0
         self.distance_mean_derivative = 0
@@ -399,12 +537,16 @@ class Target:
             self.relative_hand_pos = new_relative_hand_pos
         self.projected_collison_window.queue(impacts)
         self.predicted_impact_zone = Position(self.projected_collison_window.mean())
+        self.nb_impacts_window.queue((self.projected_collison_window.nb_impacts, elapsed), time_type='elapsed')
     
     def set_impact_ratio(self, ratio):
         self.ratio = ratio
 
+    def set_position(self, position):
+        self.position = position
+    
     def compute_time_before_impact_zone(self):
-        if self.distance_to_hand is None or self.predicted_impact_zone is None:
+        if self.relative_hand_pos is None or self.predicted_impact_zone is None:
             return
         new_distance_to_hand = Position.distance(self.relative_hand_pos, self.predicted_impact_zone)
         if self.elapsed != 0 :
@@ -431,7 +573,8 @@ class Target:
         self.compute_time_before_impact_zone()
         self.distance_mean_derivative = self.distance_window.get_mean_derivative()
         self.distance_mean_derivative_window.queue((self.distance_mean_derivative, self.elapsed), time_type='elapsed')
-        self.find_grip()
+        if self.predicted_impact_zone is not None:
+            self.find_grip()
     
     def get_distance_to_hand(self):
         return self.distance_to_hand
@@ -472,6 +615,7 @@ class Target:
                         label = self.label,
                         hand_label = self.hand_label, 
                         object_label = self.obj_label,
+                        object_index = self.index,
                         x = self.distance_window.timestamps, 
                         y = self.distance_window.data, 
                         plot_marker = 'o', 
@@ -484,6 +628,7 @@ class Target:
                         label = self.label,
                         hand_label = self.hand_label,
                         object_label = self.obj_label,
+                        object_index = self.index,
                         x = self.distance_window.timestamps,
                         y = self.distance_window.interpolated_data,
                         plot_marker = '-',
@@ -496,6 +641,7 @@ class Target:
                         label = self.label,
                         hand_label = self.hand_label,
                         object_label = self.obj_label,
+                        object_index = self.index,
                         x = self.distance_window.extrapolated_timestamps,
                         y = self.distance_window.extrapolated_data,
                         plot_marker = '--',
@@ -508,6 +654,7 @@ class Target:
                         label = self.label,
                         hand_label = self.hand_label, 
                         object_label = self.obj_label,
+                        object_index = self.index,
                         x = self.time_to_target_distance_window.timestamps, 
                         y = self.time_to_target_distance_window.data, 
                         plot_marker = 'o', 
@@ -520,6 +667,7 @@ class Target:
                         label = self.label,
                         hand_label = self.hand_label, 
                         object_label = self.obj_label,
+                        object_index = self.index,
                         x = self.distance_mean_derivative_window.timestamps, 
                         y = self.distance_mean_derivative_window.data, 
                         plot_marker = 'o', 
@@ -527,6 +675,19 @@ class Target:
                         plot_type='',
                         plot_target = 'Distance derivative')
         to_plots.append(to_plot_mean_derivative)
+        
+        to_plot_nb_impacts = dict(color = self.color,
+                        label = self.label,
+                        hand_label = self.hand_label, 
+                        object_label = self.obj_label,
+                        object_index = self.index,
+                        x = self.nb_impacts_window.timestamps, 
+                        y = self.nb_impacts_window.data, 
+                        plot_marker = 'o', 
+                        time = t, 
+                        plot_type='',
+                        plot_target = 'Impacts')
+        to_plots.append(to_plot_nb_impacts)
         return to_plots
     
     def get_index(self):

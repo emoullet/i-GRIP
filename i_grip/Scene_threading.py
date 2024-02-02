@@ -11,7 +11,7 @@ import pyglet
 
 from i_grip.utils2 import *   
 # from i_grip.Hands import GraspingHand
-from i_grip.Hands import GraspingHand
+from i_grip.Hands2 import GraspingHand
 from i_grip.Objects import RigidObject
 
 class MeshScene(tm.Scene):
@@ -179,8 +179,8 @@ class Scene :
         self.update_hands_time(timestamp = timestamp)
         hands = self.hands.copy()
         for hand_pred in hands_predictions:
-            if hand_pred.label == 'left':
-                return
+            # if hand_pred.label == 'left':
+            #     return
             if hand_pred.label not in hands:
                 self.new_hand(hand_pred.label, input=hand_pred, timestamp = timestamp)
             else : 

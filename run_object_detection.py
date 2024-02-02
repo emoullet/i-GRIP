@@ -5,7 +5,7 @@ import threading
 from i_grip import HandDetectors2 as hd
 from i_grip import Object2DDetectors as o2d
 from i_grip import ObjectPoseEstimators as ope
-from i_grip import Scene as sc
+from i_grip import Scene_nocopy as sc
 from i_grip.utils import kill_gpu_processes
 import torch
 import gc
@@ -75,15 +75,17 @@ class GraspingDetector:
         # obj_path = './YCBV_test_pictures/YCBV.png'
         obj_img = cv2.imread(obj_path)
         # obj_img = cv2.cvtColor(obj_img, cv2.COLOR_BGR2RGB)
+        obj_img = cv2.resize(obj_img, (int(obj_img.shape[1]/2), int(obj_img.shape[0]/2)))
         while self.hand_detector.isOn():
             success, img = self.hand_detector.next_frame()
             if not success:
                 self.img_to_process = None
                 continue     
             else:
+                img[0:obj_img.shape[0], 0:obj_img.shape[1]] = obj_img
                 render_img = img.copy()
                 self.img_to_process = img.copy()
-                cv2.cvtColor(self.img_to_process, cv2.COLOR_RGB2BGR, self.img_to_process)
+                self.img_to_process = cv2.cvtColor(self.img_to_process, cv2.COLOR_RGB2BGR)
                 self.img_to_process.flags.writeable = False
                 
                 #replace pixels from self.img with obj_img

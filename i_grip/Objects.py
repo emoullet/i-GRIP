@@ -7,14 +7,15 @@ import time
 
 from i_grip.utils2 import Bbox, State, Trajectory, Pose, Entity
 from i_grip import ObjectPoseEstimators as ope
+import matplotlib.colors as mcolors
 
 class RigidObjectTrajectory(Trajectory):
     
     DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z', 'qx', 'qy', 'qz', 'qw', 'Extrapolated']
     DEFAULT_ATTRIBUTES  = dict(timestamp=True, pose=True)
     
-    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None, dataframe = None) -> None:
-        super().__init__(state, headers_list, attributes_dict, file, dataframe)
+    def __init__(self, state = None, headers_list = DEFAULT_DATA_KEYS, attributes_dict=DEFAULT_ATTRIBUTES, file = None, dataframe = None, limit_size=None) -> None:
+        super().__init__(state, headers_list, attributes_dict, file, dataframe, limit_size)
 
     def __next__(self):
         if self.current_line_index < len(self.data):
@@ -39,6 +40,8 @@ class RigidObject(Entity):
                         'obj_000004' : 'tomato',
                         'obj_000005' : 'mustard',
                         'obj_000012' : 'bleach'}
+    _TARGETS_COLORS = ['green',  'orange', 'purple', 'pink', 'brown', 'grey', 'black']
+    _OBJECTS_COLORS = [mcolors.to_rgba(c) for c in _TARGETS_COLORS]
     
     _TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad'
     _YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models'
@@ -46,10 +49,11 @@ class RigidObject(Entity):
     _YCVB_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/ycbv/'
     
     # def __init__(self, dataset = 'tless',  label = None, pose=None, score = None, render_box=None, timestamp = None, trajectory = None) -> None:
-    def __init__(self, input,  timestamp = None, dataset = None, label = None) -> None:
+    def __init__(self, input,  timestamp = None, dataset = None, label = None, index = 0) -> None:
         super().__init__()
         self.dataset = dataset
         self.label = label
+        self.mesh_color = RigidObject._OBJECTS_COLORS[index]
         if label in RigidObject.LABEL_EXPE_NAMES:
             self.name = RigidObject.LABEL_EXPE_NAMES[label]
         else:
@@ -85,13 +89,14 @@ class RigidObject(Entity):
         
         self.distances={}
         print('object '+self.label+ ' discovered')
+        print(f'mesh path : {self.mesh_path}')
         self.nb_updates = 10
         self.target_metric = 0
         
         self.appearing_radius = 0.2
         self.simplify = False
         if self.dataset == 'tless':
-            self.load_simplified = False
+            self.load_simplified = True
         else:
             self.load_simplified = True
         self.load_mesh()
@@ -128,7 +133,8 @@ class RigidObject(Entity):
                 mesh_simplifier.setMesh(self.mesh.vertices,self.mesh.faces)
                 mesh_simplifier.simplify_mesh(target_count = 1000, aggressiveness=7, preserve_border=True, verbose=10)
                 v, f, n = mesh_simplifier.getMesh()
-                self.mesh = tm.Trimesh(vertices=v, faces=f, face_normals=n)
+                self.mesh = tm.Trimesh(vertices=v, faces=f, face_normals=n, face_colors=self.mesh_color)
+            self.mesh.visual.face_colors = self.mesh_color
             print(len(self.mesh.vertices))
         except:
             self.mesh = None
@@ -178,7 +184,7 @@ class RigidObject(Entity):
         self.set_mesh_updated(True)
     
     def write(self, img):
-        text = self.label 
+        text = self.name 
         x = self.render_box.corner1[0]
         y = self.render_box.corner1[1]-60
         dy = 15
@@ -205,7 +211,7 @@ class RigidObject(Entity):
             cv2.putText(img, 'd-'+k+' : '+str(int(d)) +' cm' , (x,y+20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, self.color)    
             y+=dy
 
-    def render(self, img, bbox = True, txt=True, dist=False, overlay=False):
+    def render(self, img, bbox = True, txt=False, dist=False, overlay=False):
         if self.was_built_from != 'prediction':
             return
         self.update_display()
@@ -250,6 +256,8 @@ class RigidObject(Entity):
         out = 'label: ' + str(self.label) + '\n pose: {' +str(self.pose)+'} \n nb_updates: '+str(self.nb_updates)
         return out
     
+    def get_position(self):
+        return self.state.pose.position
    
 class RigidObjectState(State):
     def __init__(self, pose = None, timestamp=None, position_factor=1, flip_pos_y = False, orientation_factor=1, trajectory = None) -> None:

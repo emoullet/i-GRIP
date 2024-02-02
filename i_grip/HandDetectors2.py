@@ -24,6 +24,7 @@ class HybridOAKMediapipeDetector():
     _720P = [1280., 720.]
     _1080P = [1920., 1080.]
     _480P = [640., 480.]
+    _480P = [640., 360.]
     
     def __init__(self, replay = False, 
                  replay_data= None, 
@@ -318,6 +319,7 @@ class HybridOAKMediapipeDetector():
             self.frame = frame
             self.new_frame = True
         else:
+            success = False
             self.frame = None
         return success, frame
 
@@ -342,6 +344,8 @@ class HybridOAKMediapipeDetector():
             # mp_frame = cv2.cvtColor(cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
             # mp_frame = cv2.cvtColor(cv2.flip(frame,1), cv2.COLOR_BGR2RGB)
             mp_frame = cv2.flip(frame,1)
+            # print('frame.shape', frame.shape)
+            # print(frame)
             # mp_frame=self.frame
             frame_timestamp_ms = round(time.time()*1000)
             # print('frame_timestamp_ms', frame_timestamp_ms)

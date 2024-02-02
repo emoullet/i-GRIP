@@ -6,11 +6,15 @@ import time
 import cv2
 import numpy as np
 import trimesh as tm
+import pyfqmr
 import pyglet
 
+import matplotlib
+# matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 from i_grip.utils2 import *   
-# from i_grip.Hands import GraspingHand
 from i_grip.Hands import GraspingHand
 from i_grip.Objects import RigidObject
 
@@ -152,6 +156,20 @@ class Scene :
         pyglet.app.run()
         print('Mesh display thread closed')
 
+
+    def update_meshes(self, scene):
+        if self.run_scene_display:
+            # print('update meshes')
+            if self.show_prediction:
+                self.predict_future_trajectory(scene)
+            self.update_hands_meshes(scene)
+            self.update_object_meshes(scene)
+            if self.show_trajectory:
+                self.update_trajectory_meshes(scene)
+            if self.detect_grasping:
+                self.check_all_targets(scene)
+                self.fetch_all_targets()
+
     def pause_scene_display(self):
         print('pause scene display')
         self.run_scene_display = False
@@ -177,10 +195,10 @@ class Scene :
         if timestamp is None:
             timestamp = time.time()
         self.update_hands_time(timestamp = timestamp)
-        hands = self.hands.copy()
+        hands = self.hands.keys()
         for hand_pred in hands_predictions:
-            if hand_pred.label == 'left':
-                return
+            # if hand_pred.label == 'right':
+            #     return
             if hand_pred.label not in hands:
                 self.new_hand(hand_pred.label, input=hand_pred, timestamp = timestamp)
             else : 
@@ -190,13 +208,13 @@ class Scene :
         # self.evaluate_grasping_intention()
         
     def propagate_hands(self, timestamp = None):
-        hands = self.hands.copy().values()
+        hands = self.hands.values()
         for hand in hands:
             hand.propagate2(timestamp = timestamp)
     
     def clean_hands(self, newhands):
         hands_label = [hand.label for hand in newhands]
-        hands = self.hands.copy()
+        hands = self.hands.keys()
         for label in hands:
             self.hands[label].setvisible(label in hands_label)
     
@@ -209,7 +227,7 @@ class Scene :
         if timestamp is None:
             timestamp = time.time()
         self.update_objects_time()
-        objs = self.objects.copy()
+        objs = self.objects.keys()
         for label, prediction in objects_predictions.items():
             if label in objs:
                 self.objects[label].update(prediction, timestamp = timestamp)
@@ -219,8 +237,8 @@ class Scene :
     
     def clean_objects(self):
         todel=[]
-        objs = self.objects.copy()
-        for label in objs.keys():
+        objs = self.objects.keys()
+        for label in objs:
             if self.objects[label].nb_updates <=0:
                 todel.append(label)
             self.objects[label].nb_updates-=1
@@ -228,25 +246,13 @@ class Scene :
             del self.objects[key]
             print('object '+key+' forgotten')
      
-    def update_meshes(self, scene):
-        if self.run_scene_display:
-            # print('update meshes')
-            if self.show_prediction:
-                self.predict_future_trajectory(scene)
-            self.update_hands_meshes(scene)
-            self.update_object_meshes(scene)
-            if self.show_trajectory:
-                self.update_trajectory_meshes(scene)
-            if self.detect_grasping:
-                self.check_all_targets(scene)
-                self.fetch_all_targets()
 
     def update_hands_meshes(self, scene):
         hands_to_delete = self.hands_to_delete.copy().keys()
         self.hands_to_delete = {}
         new_hand_meshes = self.new_hand_meshes.copy()    
         self.new_hand_meshes = []
-        hands = self.hands.copy().items()
+        hands = self.hands.items()
         
         for label in hands_to_delete:
             scene.delete_geometry(label)
@@ -262,11 +268,11 @@ class Scene :
                 scene.add_geometry(hand.ray_visualize, geom_name=hand.label+'vel_cone')
 
     def update_object_meshes(self, scene):     
-        objects_to_delete = self.objects_to_delete.copy().keys()
+        objects_to_delete = self.objects_to_delete.keys()
         self.objects_to_delete = {}
         new_object_meshes = self.new_object_meshes.copy()
         self.new_object_meshes = []
-        objects = self.objects.copy().items()
+        objects = self.objects.items()
         
         for label in objects_to_delete:
             scene.delete_geometry(label)
@@ -281,10 +287,10 @@ class Scene :
             scene.graph.update(label, matrix=obj.get_mesh_transform(), geometry = label)
 
     def check_all_targets(self, scene, timestamp = None):
-        hands = self.hands.copy()
-        objs = self.objects.copy()
-        for hlabel, hand in hands.items(): 
-            for olabel, obj in objs.items():
+        hands = self.hands.values()
+        objs = self.objects.items()
+        for  hand in hands: 
+            for olabel, obj in objs:
                 if olabel in scene.geometry:
                     mesh = scene.geometry[olabel]
                     new, impacts_mesh_frame_locations = hand.check_target(obj, mesh)
@@ -299,8 +305,8 @@ class Scene :
                     print('Mesh '+olabel+' has not been loaded yet')
     
     def update_trajectory_meshes(self, scene):
-        hands = self.hands.copy()
-        for hlabel, hand in hands.items():
+        hands = self.hands.values()
+        for hand in hands:
             if self.show_trajectory:
                 scene.delete_geometry(hand.label+'trajectory')
                 scene.delete_geometry(hand.label+'extrapolated_trajectory')
@@ -313,8 +319,8 @@ class Scene :
                     scene.add_geometry(extrapolated_trajectory, geom_name=hand.label+'extrapolated_trajectory')
     
     def predict_future_trajectory(self, scene):
-        hands= self.hands.copy()
-        for hlabel, hand in hands.items():
+        hands= self.hands.values()
+        for hand in hands:
             scene.delete_geometry(hand.label+'future_trajectory')
             predicted_trajectory = hand.get_future_trajectory_points()
             if len(predicted_trajectory):
@@ -323,10 +329,10 @@ class Scene :
     
     def fetch_all_targets(self):
         self.targets = {}
-        hands = self.hands.copy()
-        objs = self.objects.copy()
-        for hlabel, hand in hands.items():
-            self.targets[hlabel]= hand.fetch_targets()
+        hands = self.hands.keys()
+        objs = self.objects.keys()
+        for hlabel in hands:
+            self.targets[hlabel]= self.hands[hlabel].fetch_targets()
     
         for olabel in objs:
             target_info = (False, None, None)
@@ -337,7 +343,7 @@ class Scene :
 
 
     def evaluate_grasping_intention(self):
-        hands = self.hands.copy().values
+        hands = self.hands.values()
         objs = self.objects.values()
         for obj in objs():
             for hand in hands:
@@ -351,7 +357,7 @@ class Scene :
         else:
             now = timestamp
         self.elapsed_hands= now - self.time_hands 
-        hands = self.hands.copy().values()
+        hands = self.hands.values()
         for hand in hands:
             hand.set_elapsed(self.elapsed_hands)
         self.fps_hands = 1 / self.elapsed_hands
@@ -448,8 +454,8 @@ class LiveScene(Scene):
     def render(self, img):
         # self.compute_distances()
         self.update_scene_time()
-        hands = self.hands.copy().values()
-        objs = self.objects.copy().values()
+        hands = self.hands.values()
+        objs = self.objects.values()
         for hand in hands:
             hand.render(img)
         for obj in objs:
@@ -481,8 +487,8 @@ class ReplayScene(Scene):
     def render(self, img):  
         # self.compute_distances()
         self.update_scene_time()
-        hands = self.hands.copy().values()
-        objs = self.objects.copy().values()
+        hands = self.hands.values()
+        objs = self.objects.values()
         for hand in hands:
             hand.render(img)
         for obj in objs:

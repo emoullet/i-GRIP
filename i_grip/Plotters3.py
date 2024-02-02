@@ -10,7 +10,9 @@ class ProcessPlotter(object):
     def __init__(self):
         self.plot_is_new = {}
         self.legend_items = {}
+        self.targets = {}
         self.lines  = {}
+        self.targets_legs = {}
     def terminate(self):
         plt.close('all')
 
@@ -20,11 +22,16 @@ class ProcessPlotter(object):
         data_time = {}
         data_targets = {}
         data_distance_derivative = {}
+        data_impacts = {}
+        data_confidence = {}
+        
         for hand in ['left', 'right']:
             data_distance[hand] = []
             data_time[hand] = []
             data_targets[hand] = []
             data_distance_derivative[hand] = []
+            data_impacts[hand] = []
+            data_confidence[hand] = []
                         
         while self.pipe.poll():
             command = self.pipe.recv()
@@ -40,6 +47,10 @@ class ProcessPlotter(object):
                     data_targets[command['hand_label']].append(command)
                 elif command['plot_target'] == 'Distance derivative':
                     data_distance_derivative[command['hand_label']].append(command)
+                elif command['plot_target'] == 'Impacts':
+                    data_impacts[command['hand_label']].append(command)
+                elif command['plot_target'] == 'Confidence':
+                    data_confidence[command['hand_label']].append(command)
                 else:
                     print('plot_target not found')
         for hand in ['left', 'right']:
@@ -51,6 +62,10 @@ class ProcessPlotter(object):
                 self.plot_metric(data_targets[hand], 'Targets', hand)
             if len(data_distance_derivative)>0:
                 self.plot_metric(data_distance_derivative[hand], 'Distance derivative', hand)
+            if len(data_impacts)>0:
+                self.plot_metric(data_impacts[hand], 'Impacts', hand)
+            if len(data_confidence)>0:
+                self.plot_metric(data_confidence[hand], 'Confidence', hand)
             
         if len(data_distance)>0 or len(data_time)>0 or len(data_targets)>0:
             self.fig.canvas.draw()
@@ -103,14 +118,17 @@ class ProcessPlotter(object):
                     object_label = command['object_label']
                     if object_label not in self.legend_items.keys():
                         self.legend_items[object_label] = command['color']
+                        self.targets[object_label] = command['object_index']
                         self.legend_handles.append(mlines.Line2D([], [], color=command['color'], marker='o', linestyle='None', label=object_label))
                         self.fig.legends=[]
                         self.fig.legend(handles=self.legend_handles, loc='right', bbox_to_anchor=(1., 0.5))
+                        self.axs[i,3].plot([-2,2], [command['object_index'], command['object_index']], 'o', color = command['color'], linestyle = '-')
+                        # for tick in self.axs[i,3].get_yticklabels():
+                        #     tick.set_rotation(45)
                     # self.axs[i,j].legend()
                     line_label = command['label']+command['plot_type']+metric_hand
                 
                 elif 'metric_label' in command.keys():
-                    print('metric_label found : ', command)
                     metric_label = command['metric_label']
                     if metric_label not in self.legend_items.keys():
                         self.legend_items[metric_label] = command['color']
@@ -124,6 +142,19 @@ class ProcessPlotter(object):
                     self.lines[line_label] = self.axs[i,j].plot(x, y, command['plot_marker'], color = command['color'], label = line_label)[0]
                 else:
                     self.lines[line_label].set_data(x, y)
+                    
+                if 'object_label' in command.keys():
+                    object_label = command['object_label']
+                    tar_hand = object_label + hand
+                    if tar_hand not in self.targets_legs.keys():
+                        labs_indexes = [0]
+                        labels = ['No target']
+                        for label, index in self.targets.items():
+                            labs_indexes.append(index)
+                            labels.append(label)
+                        self.axs[i,3].set_yticks(labs_indexes, labels = labels)
+                        self.axs[i,3].set_ylim([-0.5, len(self.targets)+0.5])
+                        plt.setp(self.axs[i,3].get_yticklabels(), rotation=45, va="center",ha="right")
            
             
     def __call__(self, pipe):
@@ -133,22 +164,28 @@ class ProcessPlotter(object):
         
         self.hands= ['left', 'right']
         
-        self.metrics = ['Distance', 'Time to impact', 'Distance derivative', 'Targets']
+        self.metrics = ['Impacts', 'Distance', 'Distance derivative', 'Targets', 'Confidence', 'Time to impact']
         time_min = -0.8
         time_max = 0.3
-        xlims={'Distance':[time_min,time_max+0.3], 'Time to impact':[time_min,time_max], 'Distance derivative':[time_min,time_max], 'Targets':[time_min,time_max]}
-        ylims={'Distance':[0,800], 'Time to impact':[-2,2], 'Distance derivative':[-1000,1000], 'Targets':[0,4]}
+        xlims={'Distance':[time_min,time_max+0.3], 'Time to impact':[time_min,time_max], 'Distance derivative':[time_min,time_max], 'Targets':[time_min,time_max], 'Impacts':[time_min,time_max], 'Confidence':[time_min,time_max]}
+        ylims={'Distance':[0,800], 'Time to impact':[-0.2,3], 'Distance derivative':[-1000,1000], 'Targets':[-0.5,0.5], 'Impacts':[0,200], 'Confidence':[-0.1,1.1]}
         
         self.fig, self.axs = plt.subplots(len(self.hands),len(self.metrics))
-        self.fig.subplots_adjust(right=0.8)
+        self.fig.subplots_adjust(left= 0.05, right=0.85,  wspace=0.3)
         self.fig.suptitle('Target detection')
-        self.fig.set_size_inches(13, 10.5/2)
+        self.fig.set_size_inches(15, 6)
         
         for i, hand in enumerate(self.hands):
             self.axs[i,0].set_ylabel(hand)
             for j, metric in enumerate(self.metrics):
                 self.axs[i,j].set_xlim(xlims[metric])
                 self.axs[i,j].set_ylim(ylims[metric])
+            
+        
+            labs_indexes = [0]
+            labels = ['No target']
+            self.axs[i,3].set_yticks(labs_indexes, labels = labels)
+            plt.setp(self.axs[i,3].get_yticklabels(), rotation=45, va="center",ha="right")
         
         for j, metric in enumerate(self.metrics):
             print(f'j: {j}')
@@ -218,13 +255,6 @@ class NBPlot(object):
 
     def plot(self, data, finished=False):
         send = self.plot_pipe.send
-        if finished:
-            send(None)
-        else:
-            send(data)
-    
-    def plot_time(self, data, finished=False):
-        send = self.plot_pipe_time.send
         if finished:
             send(None)
         else:

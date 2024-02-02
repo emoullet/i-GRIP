@@ -7,15 +7,12 @@ import cv2
 import subprocess
 import pandas as pd
 import os
-from i_grip.HandDetectors2 import HandPrediction
+# from i_grip.HandDetectors2 import HandPrediction
 from i_grip.Filters import LandmarksSmoothingFilter
 from findiff import FinDiff
-import pynumdiff
+# import pynumdiff
 from scipy.interpolate import CubicSpline
 import trimesh as tm
-from sklearn.linear_model import Ridge
-from sklearn.pipeline import make_pipeline
-from sklearn.preprocessing import PolynomialFeatures, SplineTransformer
 
 class Position:
     def __init__(self, input = None, display='mm', swap_y = False) -> None:
@@ -94,6 +91,10 @@ class Position:
     
     @staticmethod
     def distance(p1 : 'Position', p2 : 'Position'):
+        if p1 is None :
+            print('p1 is None')
+        if p2 is None :
+            print('p2 is None')
         return np.linalg.norm(p1.v - p2.v)
     
     def as_list(self):
@@ -392,8 +393,9 @@ class Trajectory():
     
     DATA_KEYS = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'v']
     
-    def __init__(self, state = None, headers_list=DATA_KEYS, attributes_dict=None, file = None, dataframe =None) -> None:
+    def __init__(self, state = None, headers_list=DATA_KEYS, attributes_dict=None, file = None, dataframe =None, limit_size = None) -> None:
         self.attributes_dict = attributes_dict
+        self.limit_size = limit_size
         if dataframe is not None:
             self.data = dataframe                
         elif file is not None:
@@ -420,8 +422,8 @@ class Trajectory():
         return cls(file=file)
     
     @classmethod
-    def from_state(cls, state):
-        return cls(state = state)
+    def from_state(cls, state, limit_size = None):
+        return cls(state = state, limit_size = limit_size)
     
     def add(self, new_state:State, extrapolated=False):
         if new_state is not None:
@@ -432,6 +434,12 @@ class Trajectory():
             else:
                 new_entries = new_state.as_list(**self.attributes_dict)+[extrapolated]
                 self.data.loc[len(self.data)] = new_entries
+        if self.limit_size is not None:
+            if len(self.data)>self.limit_size:
+                #delete the first line
+                self.data = self.data.iloc[1:,:]
+                #reset the index
+                self.data.reset_index(drop=True, inplace=True)
             # self.states.append(new_state)
             
     def get_data(self):
