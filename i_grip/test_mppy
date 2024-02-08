@@ -1,0 +1,55 @@
+import multiprocessing as mp
+from i_grip.Targets import RealTimeWindow, Target
+import time
+from i_grip.utils2 import Position
+
+from multiprocessing.managers import BaseManager
+
+class Try:
+    def __init__(self):
+        BaseManager.register('RealTimeWindow', RealTimeWindow)
+        BaseManager.register('Target', Target)
+        BaseManager.register('Position', Position)
+        manager = BaseManager()
+        manager.start()
+        self.window =  manager.RealTimeWindow(20, 'test')
+        self.target = manager.Target('test','hjk')
+        self.position = manager.Position([0,0,0])
+            
+        p1 = mp.Process(target=self.increment)
+        p2 = mp.Process(target=self.print_data)
+        p1.start()
+        p2.start()
+        time.sleep(0.1)
+        print('HERE')
+        print(self.window.get_data())
+        print('LATER')
+        time.sleep(0.1)
+        print('HERE')
+        print(self.window.get_data())
+        print('LATER')
+        p1.join()
+        p2.join()
+        print('done')
+        
+    def increment(self):
+        i = 0
+        while i < 10:
+            self.window.queue((i, time.time()) )
+            self.target.update_distance(i**2, i**2)
+            self.position.update(Position([i, i, i]))
+            print(self.position.get_ve())
+            i += 1
+            print('added data')
+            time.sleep(0.1)
+
+    def print_data(self):
+        i=0
+        while i < 10:
+            print(self.window.get_data())
+            print(self.target.get_distance_to_hand())
+            print(self.position.__str__())
+            i += 1
+            time.sleep(0.1)
+if __name__ == '__main__':
+    t = Try()

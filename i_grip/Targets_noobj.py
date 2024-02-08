@@ -496,11 +496,12 @@ class Target:
         self.index = index+1
         self.color = Target._TARGETS_COLORS[index]
         self.object = obj
-        self.obj_label = obj.name
+        # self.obj_label = obj.name
         self.hand_label = hand_label
-        self.label = self.obj_label + '_from_' + self.hand_label
+        # self.label = self.obj_label + '_from_' + self.hand_label
+        self.label = obj + '_from_' + self.hand_label
         self.window_size = visu_window_size
-        self.position = self.object.get_position()
+        # self.position = self.object.get_position()
         
         self.projected_collison_window = HandConeImpactsWindow(analysis_window_size, self.label+'_projected impacts')
         self.distance_window = RealTimeWindow(20, self.label+'_distance')
@@ -532,8 +533,7 @@ class Target:
         # print('label', self.obj_label, 'new_distance', new_distance, 'elapsed', elapsed)
         self.distance_window.queue((new_distance, elapsed), time_type='elapsed')
 
-    def new_impacts(self, impacts, new_relative_hand_pos, elapsed):    
-        print('from target', self.object.label, self.object, ' position', self.object.get_position())
+    def new_impacts(self, impacts, new_relative_hand_pos, elapsed):        
         if elapsed != 0:
             self.elapsed = elapsed
             # self.relative_hand_vel = (new_relative_hand_pos.v - self.relative_hand_pos.v)/elapsed

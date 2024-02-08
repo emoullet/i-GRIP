@@ -9,9 +9,17 @@ class Hands3DDetector:
     _MEDIAPIPE_MODEL_PATH = '/home/emoullet/Mediapipe2/hand_landmarker_aout23.task'
     LIVE_STREAM_MODE = 'LIVE_STREAM'
     VIDEO_FILE_MODE = 'VIDEO'
+    _HANDS_MODE = ['left', 'right']
     
-    def __init__(self, cam_data, running_mode = LIVE_STREAM_MODE,  mediapipe_model_path=_MEDIAPIPE_MODEL_PATH):
+    def __init__(self, cam_data, hands = _HANDS_MODE,running_mode = LIVE_STREAM_MODE,  mediapipe_model_path=_MEDIAPIPE_MODEL_PATH):
         self.cam_data = cam_data
+        
+        for hand in hands:
+            if hand not in self._HANDS_MODE:
+                raise ValueError(f'hand must be one of {self._HANDS_MODE}')
+        self.hands_to_detect = hands
+        self.num_hands = len(hands)
+        
         
         if running_mode not in [self.LIVE_STREAM_MODE, self.VIDEO_FILE_MODE]:
             raise ValueError(f'running_mode must be one of {self.LIVE_STREAM_MODE} or {self.VIDEO_FILE_MODE}')
@@ -21,7 +29,7 @@ class Hands3DDetector:
             self.landmarker_options = mp.tasks.vision.HandLandmarkerOptions(
                 base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path),
                 running_mode=mp.tasks.vision.RunningMode.LIVE_STREAM,
-                num_hands=2,
+                num_hands=self.num_hands,
                 min_hand_presence_confidence=0.4,
                 min_hand_detection_confidence=0.4,
                 min_tracking_confidence=0.4,
@@ -32,7 +40,7 @@ class Hands3DDetector:
             self.landmarker_options = mp.tasks.vision.HandLandmarkerOptions(
                 base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path),
                 running_mode=mp.tasks.vision.RunningMode.VIDEO,
-                num_hands=2,
+                num_hands=self.num_hands,
                 min_hand_presence_confidence=0.4,
                 min_hand_detection_confidence=0.4,
                 min_tracking_confidence=0.4
@@ -58,8 +66,8 @@ class Hands3DDetector:
                 hand_landmarks = hand_landmarks_list[idx]
                 hand_world_landmarks = hand_world_landmarks_list[idx]
                 handedness = handedness_list[idx]
-
-                if len(hand_landmarks)>0 and self.depth_map is not None:
+                label = handedness[0].category_name.lower()
+                if len(hand_landmarks)>0 and self.depth_map is not None and label in self.hands_to_detect and label in self.hands_to_detect:
                     hand = HandPrediction(handedness, hand_landmarks, hand_world_landmarks, self.depth_map, self.stereoInference)
                     hands_preds.append(hand)
             self.hands_predictions = hands_preds

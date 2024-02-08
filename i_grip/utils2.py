@@ -18,6 +18,11 @@ class Position:
     def __init__(self, input = None, display='mm', swap_y = False) -> None:
         '''Position in millimeters'''
         # vect[1] = -vect[1]
+        
+        self.display = display  
+        self.update(input)
+    
+    def update(self, input):
         if input is None:
             vect = np.array([0,0,0])
         elif isinstance(input, Position):
@@ -36,13 +41,17 @@ class Position:
             vect = np.array(input)
         else:
             raise TypeError('Position must be initialized with a list, a numpy array or a Position object')
-        
         self.x = vect[0]
         self.y = vect[1]
         self.z = vect[2]
         self.v = vect
-        self.display = display  
         self.ve = np.hstack((self.v,1)) 
+    
+    def get_v(self):
+        return self.v
+    
+    def get_ve(self):
+        return self.ve
 
     def __str__(self):
         if self.display == 'cm':
@@ -78,7 +87,15 @@ class Position:
                 return self + Position(other)
             except:
                 raise TypeError('Position can only be added to a Position, a numpy array or a list')
-        
+    
+    def __sub__(self, other):
+        if isinstance(other, Position):
+            return Position(self.v-other.v)
+        else :
+            try:
+                return self - Position(other)
+            except:
+                raise TypeError('Position can only be subtracted from a Position, a numpy array or a list')
     
     def __call__(self):
         return self.v
@@ -95,7 +112,7 @@ class Position:
             print('p1 is None')
         if p2 is None :
             print('p2 is None')
-        return np.linalg.norm(p1.v - p2.v)
+        return np.linalg.norm(Position(p1).v - Position(p2).v)
     
     def as_list(self):
         return self.v.tolist()
@@ -292,13 +309,45 @@ class Filter(LandmarksSmoothingFilter):
     @classmethod
     def both(cls, key):
         return cls(key, type='natural'), cls(key, type='derivative')
-    
 
-class Entity:
+# TODO : add timed class  
+
+class Timed:
+    def __init__(self, timestamp = None) -> None:
+        self.timestamp = timestamp
+        self.elapsed = 0
+    
+    def set_timestamp(self, timestamp=None):
+        if timestamp is None:
+            timestamp = time.time()
+        if self.timestamp is not None:
+            self.elapsed = timestamp - self.timestamp
+            self.timestamp = timestamp
+        else:
+            self.timestamp = timestamp
+            self.elapsed = 0
+    
+    def get_timestamp(self):
+        return self.timestamp
+    
+    def set_elapsed(self, elapsed):
+        self.elapsed = elapsed
+    
+    def get_elapsed(self):
+        return self.elapsed
+    
+    def __str__(self) -> str:
+        return f'timestamp : {self.timestamp} -- elapsed : {self.elapsed}'
+    
+    def __repr__(self) -> str:
+        return self.__str__()
+
+class Entity(Timed):
     
     MAIN_DATA_KEYS = [ 'x', 'y', 'z']
     
-    def __init__(self) -> None:
+    def __init__(self, timestamp = None) -> None:
+        super().__init__(timestamp)
         self.visible = True
         self.lost = False
         self.invisible_time = 0
@@ -327,9 +376,7 @@ class Entity:
         self.visible = bool
         self.lost = not (self.invisible_time < self.max_invisible_time)
 
-    def set_elapsed(self, elapsed):
-        self.elapsed = elapsed
-
+    
     def pose(self):
         return self.pose
     
@@ -414,8 +461,8 @@ class Trajectory():
         # self.states = []
         
     @classmethod
-    def from_dataframe(cls, df:pd.DataFrame):
-        return cls(dataframe=df)
+    def from_dataframe(cls, df:pd.DataFrame, headers_list=DATA_KEYS, attributes_dict=None, limit_size = None):
+        return cls(dataframe=df, headers_list=headers_list, attributes_dict=attributes_dict, limit_size=limit_size)
     
     @classmethod
     def from_file(cls, file):

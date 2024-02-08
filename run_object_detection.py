@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-
+import multiprocessing
 import argparse
 import threading
 from i_grip import HandDetectors2 as hd
@@ -59,6 +59,7 @@ class GraspingDetector:
 
 
     def run(self):
+        multiprocessing.set_start_method('spawn', force=True)
         print(self.__dict__)
         self.hand_detector.start()
         print('start')

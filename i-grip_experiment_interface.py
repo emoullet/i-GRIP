@@ -6,7 +6,8 @@ from tkinter import filedialog, messagebox
 # from ttkbootstrap import Style
 import pandas as pd
 # import ExperimentReplayer2 as erp
-import Experiment as ex
+# import Experiment as ex
+import Experiment_refactored as ex
 
 from i_grip.utils import kill_gpu_processes
 
@@ -864,7 +865,7 @@ if __name__ == "__main__":
     kill_gpu_processes()
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'pre_processing', help="Mode of the interface")
+    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'analysis', help="Mode of the interface")
     args = vars(parser.parse_args())
     if args['mode'] == 'record':
         interface = ExperimentRecordingInterface()

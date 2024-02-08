@@ -11,7 +11,7 @@ from i_grip import RgbdCameras as rgbd
 from i_grip import Hands3DDetectors as hd
 from i_grip import Object2DDetectors as o2d
 from i_grip import ObjectPoseEstimators as ope
-from i_grip import Scene_multiprocessing as sc
+from i_grip import Scene_refactored as sc
 # from i_grip import Scene_ nocopy as sc
 from i_grip import Plotters3 as pl
 from i_grip.utils import kill_gpu_processes
@@ -24,8 +24,8 @@ def report_gpu():
    torch.cuda.empty_cache()
 
 
-def detect_hands_task( cam_data, stop_event, img_depth_pipe, detected_hands_pipe):
-    hand_detector = hd.Hands3DDetector(cam_data,
+def detect_hands_task( cam_data,hands, stop_event, img_depth_pipe, detected_hands_pipe):
+    hand_detector = hd.Hands3DDetector(cam_data, hands = hands, running_mode =
                                             hd.Hands3DDetector.LIVE_STREAM_MODE)
     while True:
         if stop_event.is_set():
@@ -144,10 +144,11 @@ class GraspingDetector:
         
     
     def run(self):
-        multiprocessing.set_start_method('spawn')
+        multiprocessing.set_start_method('spawn', force=True)
         dataset = "ycbv"
         rgbd_cam = rgbd.RgbdCamera()
         cam_data = rgbd_cam.get_device_data()
+        hands = ['right']
         
         
         plotter = pl.NBPlot()
@@ -165,7 +166,7 @@ class GraspingDetector:
         
         
         process_hands_detection = multiprocessing.Process(target=detect_hands_task, 
-                                                          args=(cam_data, stop_event, out_rgbd_frame_hands, in_hands,))
+                                                          args=(cam_data, hands, stop_event, out_rgbd_frame_hands, in_hands,))
         
         process_object_detection = multiprocessing.Process(target=detect_objects_task, 
                                                            args=(cam_data, stop_event, detect_event, out_rgb_frame_object_detection, in_object_detection,))
@@ -203,7 +204,7 @@ class GraspingDetector:
             
             # # OBJECTS
             img[0:obj_img.shape[0], 0:obj_img.shape[1]] = obj_img
-            img[0:obj_img2.shape[0], img.shape[1]-obj_img2.shape[1]:] = obj_img2
+            # img[0:obj_img2.shape[0], img.shape[1]-obj_img2.shape[1]:] = obj_img2
             
             if detect_event.is_set():
                 img_for_objects = img.copy()

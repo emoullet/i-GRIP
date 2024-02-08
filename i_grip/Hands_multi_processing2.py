@@ -11,37 +11,8 @@ from mediapipe.framework.formats import landmark_pb2
 
 from i_grip.utils2 import *
 from i_grip import Hands3DDetectors as hd
-from i_grip.Targets import TargetDetector
 from i_grip.Objects import RigidObject
 
-def hand_loop(input=None, label = None, timestamp=None,  compute_velocity_cone = False,plotter = None, in_hand_pred_pipe=None):
-    hand = GraspingHandLooper(input, label, timestamp,  compute_velocity_cone,plotter)
-    while True:
-        hand.update_from_trajectory()
-        hand.propagate2(timestamp)
-        hand.update_mesh()
-        yield hand
-
-class GraspingHand:
-    def __init__(self, input, label = None, timestamp=None,  compute_velocity_cone = False,plotter = None)-> None:
-        out_hand_pred_pipe, self.in_hand_pred_pipe = mp.Pipe(duplex=False)
-        self.looper = mp.Process(target= hand_loop,
-                                 kwargs=dict(input=input, 
-                                             label=label,
-                                             timestamp=timestamp,  
-                                             compute_velocity_cone=compute_velocity_cone,
-                                             plotter=plotter,
-                                             in_hand_pred_pipe=out_hand_pred_pipe))
-        self.looper.start()
-    
-    def __del__(self):
-        self.looper.terminate()
-        self.looper.join()
-        print('Hand looper terminated')
-    
-    def update(self, hand_pred):
-        self.in_hand_pred_pipe.send(hand_pred)
-                          
 class GraspingHandTrajectory(Trajectory):
     
     DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z', 'Extrapolated']
@@ -202,7 +173,7 @@ class GraspingHandTrajectory(Trajectory):
         return super().__repr__()
 
 
-class GraspingHandLooper(Entity):
+class GraspingHand(Entity):
     MAIN_DATA_KEYS=GraspingHandTrajectory.DEFAULT_DATA_KEYS
     
     def __init__(self, input, label = None, timestamp=None,  compute_velocity_cone = False,plotter = None)-> None:
@@ -260,8 +231,6 @@ class GraspingHandLooper(Entity):
         self.define_velocity_cone()
         self.update_mesh()
         
-        self.target_detector = TargetDetector(self.label, self.plot_color, plotter=self.plotter)
-        self.target_detector.set_hand_absolute_position(self.mesh_position)
         self.most_probable_target = None
         self.targets_data = pd.DataFrame(columns = ['Timestamp', 'label', 'grip', 'time_before_impact','ratio'])
 
@@ -449,50 +418,6 @@ class GraspingHandLooper(Entity):
         ray_directions = np.vstack(ray_directions_list)
         return ray_origins, ray_directions
     
-    def check_target(self, obj:RigidObject, mesh, mode='predicted_traj'):
-        obj_label = obj.label
-        if not (self.was_mesh_updated() or obj.was_mesh_updated()):
-            # print(f'no need to check target for {obj.label}')
-            new = False
-            self.impact_locations[obj_label] = []
-        else:
-            # print(f'checking target for {obj.label}')
-            new = True
-            
-            self.target_detector.poke_target(obj)
-            self.target_detector.set_hand_absolute_position(self.mesh_position)
-            # self.target_detector.set_hand_scalar_velocity(self.state.scalar_velocity)
-            
-            inv_trans = obj.inv_mesh_transform
-            self.hand_pos_obj_frame[obj_label] = (inv_trans@self.mesh_position.ve)[:3]
-            
-            # update distance to target
-            (closest_points,
-            distances,
-            triangle_id) = obj.mesh.nearest.on_surface(self.hand_pos_obj_frame[obj_label].reshape(1,3))
-            self.target_detector.update_distance_to(obj, distances[0], self.elapsed)
-            
-            # update impact locations
-            ray_origins_obj_frame = []
-            self.impact_locations[obj_label] = []
-            ray_origins_obj_frame = np.vstack([(inv_trans@np.append(ray_origin, 1))[:3] for ray_origin in self.ray_origins])
-            
-            rot = inv_trans[:3,:3]
-            ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in self.ray_directions])    
-            try:
-                self.impact_locations[obj_label], _, _ = mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
-                                                                            ray_directions=ray_directions_obj_frame,
-                                                                            multiple_hits=False)
-            except:
-                self.impact_locations[obj_label] = []
-            self.target_detector.new_impacts(obj_label, self.impact_locations[obj_label], self.hand_pos_obj_frame[obj_label], self.elapsed)
-            
-            #update target location
-            self.target_detector.update_target_position(obj_label, obj.get_position())
-            
-        # obj.distance_to(self)
-        return new, self.impact_locations[obj_label]
-
 
     
     def get_mesh_position(self):
@@ -513,14 +438,6 @@ class GraspingHandLooper(Entity):
         return self.future_points
     
     
-    def fetch_targets(self):
-        self.most_probable_target, targets = self.target_detector.get_most_probable_target(self.elapsed)
-        # print(f'{self.label} hand most probable target : {self.most_probable_target}')
-        # if self.most_probable_target is not None:
-        #     self.targets_data.loc[len(self.targets_data)] = [timestamp]+list(self.most_probable_target.get_info())
-        # else:
-        #     self.targets_data.loc[len(self.targets_data)] = [timestamp, '-', '-', '-', '-']
-        return targets
     
     def render(self, img):
         # Draw the hand landmarks.

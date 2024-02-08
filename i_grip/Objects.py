@@ -50,15 +50,16 @@ class RigidObject(Entity):
     
     # def __init__(self, dataset = 'tless',  label = None, pose=None, score = None, render_box=None, timestamp = None, trajectory = None) -> None:
     def __init__(self, input,  timestamp = None, dataset = None, label = None, index = 0) -> None:
-        super().__init__()
-        self.dataset = dataset
+        super().__init__(timestamp=timestamp)   
+        
         self.label = label
-        self.mesh_color = RigidObject._OBJECTS_COLORS[index]
         if label in RigidObject.LABEL_EXPE_NAMES:
             self.name = RigidObject.LABEL_EXPE_NAMES[label]
         else:
             self.name = label
-        self.default_color = (0, 255, 0)
+            
+        print('object '+self.name+ ' discovered')
+        
         if isinstance(input, ope.ObjectPoseEstimation):
             self.was_built_from = 'prediction'
             if timestamp is None:
@@ -77,7 +78,9 @@ class RigidObject(Entity):
             self.render_box = None
         else:
             raise ValueError('input must be either an ObjectPoseEstimation or a dataframe')
+         
             
+        self.dataset = dataset
         if(dataset == "ycbv"):
             self.mesh_path = RigidObject._YCVB_MESH_PATH
             self.urdf_path = RigidObject._YCVB_URDF_PATH
@@ -86,21 +89,23 @@ class RigidObject(Entity):
             self.urdf_path = RigidObject._TLESS_URDF_PATH
         else:
             raise ValueError('dataset must be either ycbv or tless')
-        
-        self.distances={}
-        print('object '+self.label+ ' discovered')
         print(f'mesh path : {self.mesh_path}')
-        self.nb_updates = 10
-        self.target_metric = 0
         
-        self.appearing_radius = 0.2
+        self.mesh_color = RigidObject._OBJECTS_COLORS[index]
+        self.default_color = (0, 255, 0)
+        
         self.simplify = False
         if self.dataset == 'tless':
             self.load_simplified = True
         else:
             self.load_simplified = True
+            
         self.load_mesh()
-        # self.load_urdf()
+        self.update_mesh()
+        
+        self.distances={}
+        self.nb_updates = 10
+        
         self.mesh_pos = np.array([0,0,0])
         self.mesh_transform = np.identity(4)
         
@@ -161,9 +166,9 @@ class RigidObject(Entity):
     def update_from_trajectory(self, index = None):
         if index is None:
             print(f'object {self.label} update from trajectory')
-            pose, timestamp = self.trajectory.__next__()
+            pose, timestamp = self.state.__next__()
         else:
-            pose, timestamp = self.trajectory[index]
+            pose, timestamp = self.state[index]
         self.state.update(pose)
         self.state.propagate(timestamp)
         self.set_mesh_updated(False)
@@ -252,9 +257,9 @@ class RigidObject(Entity):
         self.render_box.update_display(self.color, thickness)
         # print('DISPLAY UPDATED', time.time())
     
-    def __str__(self):
-        out = 'label: ' + str(self.label) + '\n pose: {' +str(self.pose)+'} \n nb_updates: '+str(self.nb_updates)
-        return out
+    # def __str__(self):
+    #     out = 'label: ' + str(self.label) + '\n pose: {' +str(self.pose)+'} \n nb_updates: '+str(self.nb_updates)
+    #     return out
     
     def get_position(self):
         return self.state.pose.position
@@ -311,3 +316,14 @@ class RigidObjectState(State):
             repr_list += self.pose_filtered.as_list()
         return repr_list
     
+    def __next__(self):
+        return self.trajectory.__next__()
+
+    def __getitem__(self, index):
+        return self.trajectory[index]
+    
+    def __str__(self) -> str:
+        return f'HandState : {self.position_filtered}'
+    
+    def __repr__(self) -> str:
+        return self.__str__()

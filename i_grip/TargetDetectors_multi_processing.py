@@ -1,6 +1,9 @@
 import numpy as np  
 from i_grip.utils2 import *
 from i_grip import Objects as ob
+from i_grip import Hands_multi_processing2 as hm
+import multiprocessing as mp
+from multiprocessing.managers import BaseManager
 
 class DataWindow:
     def __init__(self, size:int, label:str) -> None:
@@ -15,8 +18,7 @@ class DataWindow:
             del self.data[0]
         else:
             self.nb_samples+=1
-    def get_data(self):
-        return self.data
+    
             
 class HandConeImpactsWindow(DataWindow):
     def __init__(self, size: int, label:str) -> None:
@@ -174,13 +176,15 @@ class RealTimeWindow(DataWindow):
 class TargetDetector:
     
     _METRICS_COLORS = ['brown', 'grey', 'black']
-    def __init__(self, hand_label, hand_color, window_size = 20, plotter = None) -> None:
+    def __init__(self, hand:hm.GraspingHand, window_size = 20, plotter = None) -> None:
         self.window_size = window_size
         self.potential_targets:dict(Target) = {}
-        self.label = hand_label+'_target_detector'
-        self.hand_label = hand_label
+        self.hand:hm.GraspingHand = hand
+        self.set_hand_absolute_position(hand.get_mesh_position())
+        self.label = hand.label+'_target_detector'
+        self.hand_label = hand.label
         self.plotter = plotter
-        self.hand_color = hand_color 
+        self.hand_color = hand.plot_color 
         
         self.target_from_distance_window = RealTimeWindow(window_size, self.hand_label+'_target_from_distance')
         self.target_from_impacts_window = RealTimeWindow(window_size, self.hand_label+'_target_from_impacts')
@@ -205,10 +209,111 @@ class TargetDetector:
         # self.derivative_beta = derivative_beta
         # self.derivative_derivate_cutoff = derivative_derivate_cutoff
         #create a list of plotters for each target
+        self.target_processors = {}
+        
+        self.target_data_pipelines_in = {}
+        self.obj_data_pipelines_in = {}
+        self.hand_pos_pipelines_in = {}
+        self.results_pipelines_in = {}
+        self.elapsed_pipelines_in = {}
+        
+        self.target_data_pipelines_out = {}
+        self.obj_data_pipelines_out = {}
+        self.hand_pos_pipelines_out = {}
+        self.results_pipelines_out = {}
+        self.elapsed_pipelines_out = {}
     
     def new_target(self, obj:ob.RigidObject):
         self.potential_targets[obj.label] = Target(obj, hand_label=self.hand_label, index = len(self.potential_targets))
+        self.obj_data_pipelines_in[obj.label], self.obj_data_pipelines_out[obj.label] = mp.Pipe()
+        self.hand_pos_pipelines_in[obj.label], self.hand_pos_pipelines_out[obj.label] = mp.Pipe()
+        self.results_pipelines_in[obj.label], self.results_pipelines_out[obj.label] = mp.Pipe()
+        self.elapsed_pipelines_in[obj.label], self.elapsed_pipelines_out[obj.label] = mp.Pipe()
         
+        target_process = mp.Process(target=self.target_loop, 
+                                    args=(obj, 
+                                          self.obj_data_pipelines_in[obj.label],
+                                          self.hand_pos_pipelines_in[obj.label],
+                                          self.elapsed_pipelines_in[obj.label],
+                                          self.results_pipelines_out[obj.label]))
+        target_process.start()
+        self.target_processors[obj.label] = target_process
+        
+    def target_loop(self, obj:ob.RigidObject, obj_data_pipeline, hand_data_pipeline, elapsed_pipeline, results_pipeline):
+        # target = Target(obj, hand_label=self.hand_label, index = len(self.potential_targets))
+        mesh = obj.mesh
+        while True:
+            if hand_data_pipeline.poll():
+                    hand_data = hand_data_pipeline.recv()
+            if obj_data_pipeline.poll():
+                obj_data = obj_data_pipeline.recv()
+            #TODO : case where both hand and obj data are received at the same time 
+            obj_data = obj_data_pipeline.recv()
+            elapsed = elapsed_pipeline.recv()
+            
+            hand_pos = hand_data['position']
+            obj_inv_trans = obj_data['inv_mesh_transform']
+            obj_pos = obj_data['position']
+            hand_pos_obj_frame = (obj_inv_trans@hand_pos)[:3]
+            
+            # # update target position
+            # target.set_position(obj_pos)
+            
+            # update distance to target
+            (closest_points,
+            distances,
+            triangle_id) = obj.mesh.nearest.on_surface(hand_pos_obj_frame.reshape(1,3))
+            distance = distances[0]
+            
+            # update impact locations
+            ray_origins_obj_frame = []
+            impacts = []
+            ray_origins_obj_frame = np.vstack([(obj_inv_trans@np.append(ray_origin, 1))[:3] for ray_origin in self.ray_origins])
+            
+            rot = obj_inv_trans[:3,:3]
+            ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in self.ray_directions])    
+            try:
+                impacts, _, _ = mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
+                                                                            ray_directions=ray_directions_obj_frame,
+                                                                            multiple_hits=False)
+            except:
+                impacts = []
+            results = {'impacts':impacts, 'distance':distance, 'hand_pos_obj_frame':hand_pos_obj_frame, 'elapsed':elapsed}
+            results_pipeline.send(results)
+            
+            # target.new_impacts(impacts, hand_pos_obj_frame, elapsed, weight)
+            # self.potential_targets[obj.label] = target
+    
+    def update_hand(self, hand:hm.GraspingHand):
+        hand_pos = hand.get_mesh_position()
+        hand_data = {'position':hand_pos}
+        self.set_hand_absolute_position(hand_pos)
+        for label, hand_pos_pipeline in self.hand_pos_pipelines_out.items():
+            hand_pos_pipeline.send(hand_data)
+        
+    def update_objects(self, objects:dict):
+        for label, obj in objects.items():
+            self.update_object(obj)
+            
+    def update_object(self, obj:ob.RigidObject):
+        obj_data = {'inv_mesh_transform':obj.inv_mesh_transform, 'position':obj.get_position()}
+        self.obj_data_pipelines_out[obj.label].send(obj_data)
+    
+    def check_all_targets(self):
+        for label, target in self.potential_targets.items():
+            
+            target.analyse()
+            if self.plotter is not None:
+                to_plots = target.get_plots()
+                for to_plot in to_plots:
+                    to_plot['label'] = label
+                    to_plot['color'] = self.hand_color
+                    to_plot['time'] = timestamp
+                    self.plotter.plot(to_plot)
+        
+    def check_target(self, target):
+        pass
+    
     def poke_target(self, obj:ob.RigidObject):
         if not obj.label in self.potential_targets:
             self.new_target(obj)
@@ -502,38 +607,84 @@ class Target:
         self.window_size = visu_window_size
         self.position = self.object.get_position()
         
-        self.projected_collison_window = HandConeImpactsWindow(analysis_window_size, self.label+'_projected impacts')
-        self.distance_window = RealTimeWindow(20, self.label+'_distance')
-        self.time_to_target_distance_window = RealTimeWindow(visu_window_size, self.label+'_time to target distance')
-        self.time_to_target_impacts_window = RealTimeWindow(visu_window_size, self.label+'_time to target impacts')
-        self.distance_mean_derivative_window = RealTimeWindow(visu_window_size, self.label+'_mean derivative')
-        self.nb_impacts_window = RealTimeWindow(visu_window_size, self.label+'_nb impacts')
+        BaseManager.register('RealTimeWindow', RealTimeWindow)
+        BaseManager.register('HandConeImpactsWindow', HandConeImpactsWindow)
+        manager = BaseManager()
+        manager.start()
+        
+        self.projected_collison_window = manager.HandConeImpactsWindow(analysis_window_size, self.label+'_projected impacts')
+        self.distance_window = manager.RealTimeWindow(20, self.label+'_distance')
+        self.time_to_target_distance_window = manager.RealTimeWindow(visu_window_size, self.label+'_time to target distance')
+        self.time_to_target_impacts_window = manager.RealTimeWindow(visu_window_size, self.label+'_time to target impacts')
+        self.distance_mean_derivative_window = manager.RealTimeWindow(visu_window_size, self.label+'_mean derivative')
+        self.nb_impacts_window = manager.RealTimeWindow(visu_window_size, self.label+'_nb impacts')
         
         self.ratio=0
         self.distance_mean_derivative = 0
         self.time_before_impact_distance = 0
         self.time_before_impact_zone = 0
-        self.distance_to_hand = 0
+        self.distance_to_hand = mp.Value('f', 0)
         self.grip = 'None'
         if not (impacts is None or relative_hand_pos is None):
             self.projected_collison_window.queue(impacts)
             self.predicted_impact_zone = Position(self.projected_collison_window.mean())
-            self.distance_to_hand = Position.distance(relative_hand_pos, self.predicted_impact_zone)
+            self.distance_to_hand.value = Position.distance(relative_hand_pos, self.predicted_impact_zone)
             self.relative_hand_pos = relative_hand_pos
             self.find_grip()
         else: 
             self.predicted_impact_zone = None
-            self.distance_to_hand = None
+            self.distance_to_hand.value = -1
             self.relative_hand_pos = None
         self.elapsed = 0
+    
+    def data_processing_loop(self, mesh,  obj_data_pipeline, hand_pos_pipeline, elapsed_pipeline, results_pipeline):
+        while True:
+            if hand_pos_pipeline.poll():
+                hand_data = hand_pos_pipeline.recv()
+            if obj_data_pipeline.poll():
+                obj_data = obj_data_pipeline.recv()
+            if elapsed_pipeline.poll():
+                elapsed = elapsed_pipeline.recv()
+                
+            #TODO : case where both hand and obj data are received at the same time 
+            
+            hand_pos = hand_data['position']
+            obj_inv_trans = obj_data['inv_mesh_transform']
+            obj_pos = obj_data['position']
+            hand_pos_obj_frame = (obj_inv_trans@hand_pos)[:3]
+    
+            # update distance to target
+            (_, distances, _) = mesh.nearest.on_surface(hand_pos_obj_frame.reshape(1,3))
+            distance = distances[0]
+            
+            # update impact locations
+            ray_origins_obj_frame = []
+            impacts = []
+            ray_origins_obj_frame = np.vstack([(obj_inv_trans@np.append(ray_origin, 1))[:3] for ray_origin in self.ray_origins])
+            
+            rot = obj_inv_trans[:3,:3]
+            ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in self.ray_directions])    
+            try:
+                impacts, _, _ = mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
+                                                                            ray_directions=ray_directions_obj_frame,
+                                                                            multiple_hits=False)
+            except:
+                impacts = []
+            results = {'impacts':impacts, 'distance':distance, 'hand_pos_obj_frame':hand_pos_obj_frame, 'elapsed':elapsed}
+            results_pipeline.send(results)
+            
+            # target.new_impacts(impacts, hand_pos_obj_frame, elapsed, weight)
+            # self.potential_targets[obj.label] = target
+    
+    def analysis_loop(self, obj_data_pipeline, hand_pos_pipeline, elapsed_pipeline, results_pipeline):
+        pass
     
     def update_distance(self, new_distance, elapsed):
         self.distance_to_hand = new_distance
         # print('label', self.obj_label, 'new_distance', new_distance, 'elapsed', elapsed)
         self.distance_window.queue((new_distance, elapsed), time_type='elapsed')
 
-    def new_impacts(self, impacts, new_relative_hand_pos, elapsed):    
-        print('from target', self.object.label, self.object, ' position', self.object.get_position())
+    def new_impacts(self, impacts, new_relative_hand_pos, elapsed):        
         if elapsed != 0:
             self.elapsed = elapsed
             # self.relative_hand_vel = (new_relative_hand_pos.v - self.relative_hand_pos.v)/elapsed
@@ -553,14 +704,14 @@ class Target:
             return
         new_distance_to_hand = Position.distance(self.relative_hand_pos, self.predicted_impact_zone)
         if self.elapsed != 0 :
-            if self.distance_to_hand is not None:
-                distance_der = (self.distance_to_hand - new_distance_to_hand)/self.elapsed
+            if self.distance_to_hand.value !=-1:
+                distance_der = (self.distance_to_hand.value - new_distance_to_hand)/self.elapsed
                 if distance_der !=0:
                     #self.time_before_impact = new_distance_to_hand
                     self.time_before_impact_zone = new_distance_to_hand/distance_der
                     self.time_to_target_impacts_window.queue((self.time_before_impact_zone, self.elapsed), time_type='elapsed')
                 self.distance_derivative = distance_der
-            self.distance_to_hand = new_distance_to_hand
+            self.distance_to_hand.value = new_distance_to_hand
             
     def compute_time_before_impact_distance(self):
         self.time_before_impact_distance = self.distance_window.get_zero_time_explore()
@@ -580,7 +731,7 @@ class Target:
             self.find_grip()
     
     def get_distance_to_hand(self):
-        return self.distance_to_hand
+        return self.distance_to_hand.value
     
     def get_mean_distance_derivative(self):
         return self.distance_mean_derivative

@@ -230,8 +230,10 @@ class RgbdCamera:
     
     def next_frame_video(self):
         success, frame = self.video.read()
+        frame = cv2.resize(frame, self.cam_data['resolution'])
         self.frame = frame
         self.depth_map = self.depth_maps[self.current_frame_index]
+        self.depth_map = cv2.resize(self.depth_map, self.cam_data['resolution'])
         self.timestamp = self.timestamps[self.current_frame_index]
         self.current_frame_index += 1
         self.new_frame = True

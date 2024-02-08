@@ -4,44 +4,18 @@ import trimesh as tm
 import cv2
 import time
 
-import multiprocessing as mp
-
 from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 
 from i_grip.utils2 import *
 from i_grip import Hands3DDetectors as hd
-from i_grip.Targets import TargetDetector
-from i_grip.Objects import RigidObject
+# from i_grip.HandDetectors2 import HandPrediction
 
-def hand_loop(input=None, label = None, timestamp=None,  compute_velocity_cone = False,plotter = None, in_hand_pred_pipe=None):
-    hand = GraspingHandLooper(input, label, timestamp,  compute_velocity_cone,plotter)
-    while True:
-        hand.update_from_trajectory()
-        hand.propagate2(timestamp)
-        hand.update_mesh()
-        yield hand
 
-class GraspingHand:
-    def __init__(self, input, label = None, timestamp=None,  compute_velocity_cone = False,plotter = None)-> None:
-        out_hand_pred_pipe, self.in_hand_pred_pipe = mp.Pipe(duplex=False)
-        self.looper = mp.Process(target= hand_loop,
-                                 kwargs=dict(input=input, 
-                                             label=label,
-                                             timestamp=timestamp,  
-                                             compute_velocity_cone=compute_velocity_cone,
-                                             plotter=plotter,
-                                             in_hand_pred_pipe=out_hand_pred_pipe))
-        self.looper.start()
+# from sklearn.linear_model import Ridge
+# from sklearn.pipeline import make_pipeline
+# from sklearn.preprocessing import PolynomialFeatures, SplineTransformer
     
-    def __del__(self):
-        self.looper.terminate()
-        self.looper.join()
-        print('Hand looper terminated')
-    
-    def update(self, hand_pred):
-        self.in_hand_pred_pipe.send(hand_pred)
-                          
 class GraspingHandTrajectory(Trajectory):
     
     DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z', 'Extrapolated']
@@ -63,6 +37,10 @@ class GraspingHandTrajectory(Trajectory):
             self.model = make_pipeline(PolynomialFeatures(2), Ridge(alpha=1e-3))
             self.fit = self.skl_fit
             self.extrapolate = self.skl_extrapolate
+            
+    @classmethod
+    def from_dataframe(cls, df: pd.DataFrame, headers_list=DEFAULT_DATA_KEYS, attributes_dict=None, limit_size=None):
+        return cls(dataframe = df, headers_list=headers_list, attributes_dict=attributes_dict, limit_size=limit_size)
     
     def __next__(self):
         if self.current_line_index < len(self.data):
@@ -202,11 +180,11 @@ class GraspingHandTrajectory(Trajectory):
         return super().__repr__()
 
 
-class GraspingHandLooper(Entity):
+class GraspingHand(Entity):
     MAIN_DATA_KEYS=GraspingHandTrajectory.DEFAULT_DATA_KEYS
     
-    def __init__(self, input, label = None, timestamp=None,  compute_velocity_cone = False,plotter = None)-> None:
-        super().__init__()
+    def __init__(self, input, label = None, timestamp=None, plotter = None)-> None:
+        super().__init__(timestamp=timestamp)
         self.label = label
         self.plotter = plotter
         print(f'new hand : {self.label}')
@@ -230,7 +208,9 @@ class GraspingHandLooper(Entity):
                 # first_position, first_timestamp = self.trajectory[0]
                 # print(f'next hand position : {first_position, first_timestamp}')
                 # self.state = GraspingHandState.from_position(first_position, timestamp = first_timestamp)
+                print(f'buiding hand from dataframe : {input}')
                 self.state = GraspingHandState.from_dataframe(input)
+                
             else:   
                 self.state = None
         
@@ -241,7 +221,6 @@ class GraspingHandLooper(Entity):
         
  
         # self.update_trajectory(timestamp)
-        self.compute_velocity_cone = compute_velocity_cone
         self.show_label = True
         self.show_xyz = True
         self.show_roi = True
@@ -257,11 +236,7 @@ class GraspingHandLooper(Entity):
         self.impact_locations_list = {}
         self.rays_vizualize_list = {}
         self.define_mesh_representation()
-        self.define_velocity_cone()
         self.update_mesh()
-        
-        self.target_detector = TargetDetector(self.label, self.plot_color, plotter=self.plotter)
-        self.target_detector.set_hand_absolute_position(self.mesh_position)
         self.most_probable_target = None
         self.targets_data = pd.DataFrame(columns = ['Timestamp', 'label', 'grip', 'time_before_impact','ratio'])
 
@@ -294,15 +269,8 @@ class GraspingHandLooper(Entity):
             self.plot_color = 'blue'
             self.future_color = [0,255,255,255]
     
-    def define_velocity_cone(self,cone_max_length = 500, cone_min_length = 50, vmin=30, vmax=200, cone_max_diam = 200,cone_min_diam = 50, n_layers=6):
-        self.cone_angle = np.pi/8
-        self.total_nb_ray_layers = n_layers
-        self.nb_ray_layers_per_point = n_layers
-        self.cone_lenghts_spline = spline(vmin,vmax, cone_min_length, cone_max_length)
-        # self.cone_diam_spline = spline(vmin,vmax, cone_min_diam, cone_max_diam)
-        self.cone_diam_spline = spline(vmin,vmax, cone_max_diam, cone_min_diam)
     
-    def update2(self, detected_hand):
+    def update(self, detected_hand):
         self.detected_hand = detected_hand
         self.state.update(detected_hand)
         
@@ -326,7 +294,7 @@ class GraspingHandLooper(Entity):
         self.state.propagate(timestamp)
         self.set_mesh_updated(False)
         
-    def propagate2(self, timestamp=None):
+    def propagate(self, timestamp=None):
         # print(f'timestamp : {timestamp}')
         self.state.propagate_all(timestamp)
         # self.state.propagate(timestamp)
@@ -340,166 +308,20 @@ class GraspingHandLooper(Entity):
         self.mesh_position = Position(self.state.position_filtered*np.array([-1,1,1]))
         # self.mesh_position = Position(self.state.velocity_filtered*np.array([-1,1,1])+np.array([0,0,500]))
         self.mesh_transform= tm.transformations.compose_matrix(translate = self.mesh_position.v)
-        if self.compute_velocity_cone:
-            self.make_rays_from_trajectory()
         self.set_mesh_updated(True)
-        
-    def make_rays(self): 
-        vdir = self.state.get_movement_direction()*np.array([-1,1,1])
-        svel = self.state.scalar_velocity
-        if True:
-        # if svel > 10:
-            cone_len = self.cone_lenghts_spline(svel)
-            cone_diam = self.cone_diam_spline(svel)
-            random_vector = np.random.rand(len(vdir))
-
-            # projection
-            projection = np.dot(random_vector, vdir)
-
-            # vecteur orthogonal
-            orthogonal_vector = random_vector - projection * vdir
-
-            # vecteur unitaire orthogonal
-            orthogonal_unit_vector = orthogonal_vector / np.linalg.norm(orthogonal_vector)
-            orthogonal_unit_vector2 = np.cross(vdir, orthogonal_unit_vector)
-
-            ray_directions_list = [ vdir*cone_len + (-cone_diam/2+i*cone_diam/(self.total_nb_ray_layers-1)) * orthogonal_unit_vector+ (-cone_diam/2+j*cone_diam/(self.total_nb_ray_layers-1)) * orthogonal_unit_vector2 for i in range(self.total_nb_ray_layers) for j in range(self.total_nb_ray_layers) ] 
-
-            self.ray_origins = np.vstack([self.mesh_position.v for i in range(self.total_nb_ray_layers) for j in range(self.total_nb_ray_layers) ])
-            self.ray_directions = np.vstack(ray_directions_list)
-            self.ray_visualize = tm.load_path(np.hstack((
-                self.ray_origins,
-                self.ray_origins + self.ray_directions)).reshape(-1, 2, 3))     
-        else:
-            self.ray_visualize = None
     
-    def make_rays_from_trajectory(self):
-        self.get_future_trajectory_points()
-        vdir = self.state.get_movement_direction()*np.array([-1,1,1])
-        svel = self.state.scalar_velocity
-        self.impact_locations_list = {}
-        ray_origins_list = []
-        ray_directions_list = []
-        nb_ray_layers_per_point = max(2,int(self.total_nb_ray_layers/(len(self.future_points)+1)))
-        i=0
-        for point in self.future_points:
-        # for point in self.future_points[:-1]:
-            weight = 1/(i+1)
-            if i==0:
-                prev_point = point
-            else:
-                vdir = (point - prev_point)
-                # next_point= self.future_points[i+1]
-                # vdir = (next_point - point)
-                svel = np.linalg.norm(vdir)
-                vdir = vdir/svel
-                svel = (svel*(1+i*0.05))/0.01
-            ray_origins, ray_directions = self.get_rays_from_point(point, vdir, svel, nb_ray_layers_per_point)
-            prev_point = point
-            ray_origins_list.append(ray_origins)
-            ray_directions_list.append(ray_directions)
-            i+=1
-        if len(ray_origins_list)>0:
-            self.ray_origins = np.vstack(ray_origins_list)
-            self.ray_directions = np.vstack(ray_directions_list)
-            self.ray_visualize =  tm.load_path(np.hstack((
-                self.ray_origins,
-                self.ray_origins + self.ray_directions)).reshape(-1, 2, 3))    
-    
-    def get_rays_from_point(self, point, vdir, svel, nb_ray_layers):
-        cone_len = self.cone_lenghts_spline(svel)
-        cone_diam = self.cone_diam_spline(svel)
-        random_vector = np.random.rand(len(vdir))
-
-        # projection
-        projection = np.dot(random_vector, vdir)
-
-        # vecteur orthogonal
-        orthogonal_vector = random_vector - projection * vdir
-
-        # vecteur unitaire orthogonal
-        orthogonal_unit_vector = orthogonal_vector / np.linalg.norm(orthogonal_vector)
-        orthogonal_unit_vector2 = np.cross(vdir, orthogonal_unit_vector)
-
-        ray_directions_list = [ vdir*cone_len + (-cone_diam/2+i*cone_diam/(nb_ray_layers-1)) * orthogonal_unit_vector+ (-cone_diam/2+j*cone_diam/(nb_ray_layers-1)) * orthogonal_unit_vector2 for i in range(nb_ray_layers) for j in range(nb_ray_layers) ] 
-
-        ray_origins = np.vstack([point for i in range(nb_ray_layers) for j in range(nb_ray_layers) ])
-        ray_directions = np.vstack(ray_directions_list)
-        return ray_origins, ray_directions
-    
-    
-    def get_rays_from_point_old(self, point, vdir, svel):
-        cone_len = self.cone_lenghts_spline(svel)
-        cone_diam = self.cone_diam_spline(svel)
-        random_vector = np.random.rand(len(vdir))
-
-        # projection
-        projection = np.dot(random_vector, vdir)
-
-        # vecteur orthogonal
-        orthogonal_vector = random_vector - projection * vdir
-
-        # vecteur unitaire orthogonal
-        orthogonal_unit_vector = orthogonal_vector / np.linalg.norm(orthogonal_vector)
-        orthogonal_unit_vector2 = np.cross(vdir, orthogonal_unit_vector)
-
-        ray_directions_list = [ vdir*cone_len + (-cone_diam/2+i*cone_diam/(self.total_nb_ray_layers-1)) * orthogonal_unit_vector+ (-cone_diam/2+j*cone_diam/(self.total_nb_ray_layers-1)) * orthogonal_unit_vector2 for i in range(self.total_nb_ray_layers) for j in range(self.total_nb_ray_layers) ] 
-
-        ray_origins = np.vstack([point for i in range(self.total_nb_ray_layers) for j in range(self.total_nb_ray_layers) ])
-        ray_directions = np.vstack(ray_directions_list)
-        return ray_origins, ray_directions
-    
-    def check_target(self, obj:RigidObject, mesh, mode='predicted_traj'):
-        obj_label = obj.label
-        if not (self.was_mesh_updated() or obj.was_mesh_updated()):
-            # print(f'no need to check target for {obj.label}')
-            new = False
-            self.impact_locations[obj_label] = []
-        else:
-            # print(f'checking target for {obj.label}')
-            new = True
-            
-            self.target_detector.poke_target(obj)
-            self.target_detector.set_hand_absolute_position(self.mesh_position)
-            # self.target_detector.set_hand_scalar_velocity(self.state.scalar_velocity)
-            
-            inv_trans = obj.inv_mesh_transform
-            self.hand_pos_obj_frame[obj_label] = (inv_trans@self.mesh_position.ve)[:3]
-            
-            # update distance to target
-            (closest_points,
-            distances,
-            triangle_id) = obj.mesh.nearest.on_surface(self.hand_pos_obj_frame[obj_label].reshape(1,3))
-            self.target_detector.update_distance_to(obj, distances[0], self.elapsed)
-            
-            # update impact locations
-            ray_origins_obj_frame = []
-            self.impact_locations[obj_label] = []
-            ray_origins_obj_frame = np.vstack([(inv_trans@np.append(ray_origin, 1))[:3] for ray_origin in self.ray_origins])
-            
-            rot = inv_trans[:3,:3]
-            ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in self.ray_directions])    
-            try:
-                self.impact_locations[obj_label], _, _ = mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
-                                                                            ray_directions=ray_directions_obj_frame,
-                                                                            multiple_hits=False)
-            except:
-                self.impact_locations[obj_label] = []
-            self.target_detector.new_impacts(obj_label, self.impact_locations[obj_label], self.hand_pos_obj_frame[obj_label], self.elapsed)
-            
-            #update target location
-            self.target_detector.update_target_position(obj_label, obj.get_position())
-            
-        # obj.distance_to(self)
-        return new, self.impact_locations[obj_label]
-
-
     
     def get_mesh_position(self):
         return self.mesh_position.v
     
     def get_trajectory_points(self):
         return self.state.trajectory.get_xyz_data()
+    
+    def get_movement_direction(self):
+        return self.state.get_movement_direction()
+    
+    def get_scalar_velocity(self):
+        return self.state.scalar_velocity
     
     def get_future_trajectory_points(self):
         self.future_points = self.state.get_future_trajectory_points()
@@ -633,6 +455,7 @@ class GraspingHandState(State):
         # first_row = df.iloc[0]
         # first_position = Position(np.array([first_row['x'], first_row['y'], first_row['z']]), display='cm', swap_y=True)
         # first_timestamp = first_row['Timestamps']
+        print(f'buiding hand state from dataframe : {df}')
         trajectory = GraspingHandTrajectory.from_dataframe(df)
         first_position, first_timestamp = trajectory[0]
         print(f'next hand position : {first_position, first_timestamp}')
@@ -818,7 +641,7 @@ class GraspingHandState(State):
         return repr_list
 
     def __next__(self):
-        return self.trajecory.__next__()
+        return self.trajectory.__next__()
 
     def __getitem__(self, index):
         return self.trajectory[index]

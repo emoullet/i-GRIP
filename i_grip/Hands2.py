@@ -426,6 +426,7 @@ class GraspingHand(Entity):
         return ray_origins, ray_directions
     
     def check_target(self, obj:RigidObject, mesh, mode='predicted_traj'):
+        print('from hands', obj.label, obj, 'pos :', obj.get_position())
         obj_label = obj.label
         if not (self.was_mesh_updated() or obj.was_mesh_updated()):
             # print(f'no need to check target for {obj.label}')
