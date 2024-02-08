@@ -204,7 +204,7 @@ class GraspingDetector:
             
             # # OBJECTS
             img[0:obj_img.shape[0], 0:obj_img.shape[1]] = obj_img
-            # img[0:obj_img2.shape[0], img.shape[1]-obj_img2.shape[1]:] = obj_img2
+            img[0:obj_img2.shape[0], img.shape[1]-obj_img2.shape[1]:] = obj_img2
             
             if detect_event.is_set():
                 img_for_objects = img.copy()
