@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import matplotlib
+import time
 matplotlib.use('tkAgg')
 import multiprocessing as mp
 import matplotlib.pyplot as plt
@@ -18,12 +19,15 @@ class ProcessPlotter(object):
 
 
     def call_back(self):
+        print('call_back plotter...')
+        t = time.time()
         data_distance = {}
         data_time = {}
         data_targets = {}
         data_distance_derivative = {}
         data_impacts = {}
         data_confidence = {}
+        data_com_time = {}
         
         for hand in ['left', 'right']:
             data_distance[hand] = []
@@ -32,6 +36,7 @@ class ProcessPlotter(object):
             data_distance_derivative[hand] = []
             data_impacts[hand] = []
             data_confidence[hand] = []
+            data_com_time[hand] = []
                         
         while self.pipe.poll():
             command = self.pipe.recv()
@@ -39,20 +44,30 @@ class ProcessPlotter(object):
                 self.terminate()
                 return False
             else:
-                if command['plot_target'] == 'Distance':
-                    data_distance[command['hand_label']].append(command)
-                elif command['plot_target'] == 'Time to impact':
-                    data_time[command['hand_label']].append(command)
-                elif command['plot_target'] == 'Targets':
-                    data_targets[command['hand_label']].append(command)
-                elif command['plot_target'] == 'Distance derivative':
-                    data_distance_derivative[command['hand_label']].append(command)
-                elif command['plot_target'] == 'Impacts':
-                    data_impacts[command['hand_label']].append(command)
-                elif command['plot_target'] == 'Confidence':
-                    data_confidence[command['hand_label']].append(command)
+                if type(command) is dict:
+                    command = [command]
+                    print('command is dict')
                 else:
-                    print('plot_target not found')
+                    print('command is not dict')
+                for command in command:
+                    if command['plot_target'] == 'Distance':
+                        data_distance[command['hand_label']].append(command)
+                    elif command['plot_target'] == 'Time to impact':
+                        data_time[command['hand_label']].append(command)
+                    elif command['plot_target'] == 'Targets':
+                        data_targets[command['hand_label']].append(command)
+                    elif command['plot_target'] == 'Distance derivative':
+                        data_distance_derivative[command['hand_label']].append(command)
+                    elif command['plot_target'] == 'Impacts':
+                        data_impacts[command['hand_label']].append(command)
+                    elif command['plot_target'] == 'Confidence':
+                        data_confidence[command['hand_label']].append(command)
+                    elif command['plot_target'] == 'Computation Times':
+                        data_com_time[command['hand_label']].append(command)
+                    else:
+                        print('plot_target not found')
+            print(f'plotter time receive data: {(time.time()-t)*1000} ms ')
+            # print(f'command: {command}')
         for hand in ['left', 'right']:
             if len(data_distance)>0:
                 self.plot_metric(data_distance[hand], 'Distance', hand)
@@ -66,6 +81,8 @@ class ProcessPlotter(object):
                 self.plot_metric(data_impacts[hand], 'Impacts', hand)
             if len(data_confidence)>0:
                 self.plot_metric(data_confidence[hand], 'Confidence', hand)
+            if len(data_com_time)>0:
+                self.plot_metric(data_com_time[hand],'Computation Times', hand)
             
         if len(data_distance)>0 or len(data_time)>0 or len(data_targets)>0:
             self.fig.canvas.draw()
@@ -164,11 +181,12 @@ class ProcessPlotter(object):
         
         self.hands= ['left', 'right']
         
-        self.metrics = ['Impacts', 'Distance', 'Distance derivative', 'Targets', 'Confidence', 'Time to impact']
+        self.metrics = ['Impacts', 'Distance', 'Distance derivative', 'Targets', 'Confidence', 'Time to impact', 'Computation Times']
+        # self.metrics = ['Impacts', 'Distance', 'Distance derivative', 'Targets']
         time_min = -0.8
         time_max = 0.3
-        xlims={'Distance':[time_min,time_max+0.3], 'Time to impact':[time_min,time_max], 'Distance derivative':[time_min,time_max], 'Targets':[time_min,time_max], 'Impacts':[time_min,time_max], 'Confidence':[time_min,time_max]}
-        ylims={'Distance':[0,800], 'Time to impact':[-0.2,3], 'Distance derivative':[-1000,1000], 'Targets':[-0.5,0.5], 'Impacts':[0,200], 'Confidence':[-0.1,1.1]}
+        xlims={'Distance':[time_min,time_max+0.3], 'Time to impact':[time_min,time_max], 'Distance derivative':[time_min,time_max], 'Targets':[time_min,time_max], 'Impacts':[time_min,time_max], 'Confidence':[time_min,time_max], 'Computation Times': [time_min, time_max]}
+        ylims={'Distance':[0,800], 'Time to impact':[-0.2,3], 'Distance derivative':[-1000,1000], 'Targets':[-0.5,0.5], 'Impacts':[0,200], 'Confidence':[-0.1,1.1], 'Computation Times': [-5, 50]}
         
         self.fig, self.axs = plt.subplots(len(self.hands),len(self.metrics))
         self.fig.subplots_adjust(left= 0.05, right=0.85,  wspace=0.3)
@@ -202,7 +220,7 @@ class ProcessPlotter(object):
         self.legend_handles = [sampled_data_handle, interpolated_data_handle, extrapolated_data_handle]
         self.fig.legend(handles=self.legend_handles, loc='right', bbox_to_anchor=(1., 0.5))
         
-        timer = self.fig.canvas.new_timer(interval=30)
+        timer = self.fig.canvas.new_timer(interval=10)
         timer.add_callback(self.call_back)
         timer.start()
 

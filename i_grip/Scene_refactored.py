@@ -341,6 +341,8 @@ class Scene :
 
 
     def check_all_targets(self, scene, timestamp = None):
+        if timestamp is None:
+            timestamp = time.time()
         tall = time.time()
         target_detector_labels = self.target_detectors.copy().keys()
         for label in target_detector_labels:

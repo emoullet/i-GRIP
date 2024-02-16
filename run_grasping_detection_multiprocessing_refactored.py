@@ -6,12 +6,15 @@ import torch
 import gc
 import os
 import cv2
+import tracemalloc
+import time
 
 from i_grip import RgbdCameras as rgbd
 from i_grip import Hands3DDetectors as hd
 from i_grip import Object2DDetectors as o2d
 from i_grip import ObjectPoseEstimators as ope
-from i_grip import Scene_refactored as sc
+# from i_grip import Scene_refactored as sc
+from i_grip import Scene_refactored_multi as sc
 # from i_grip import Scene_ nocopy as sc
 from i_grip import Plotters3 as pl
 from i_grip.utils import kill_gpu_processes
@@ -28,6 +31,7 @@ def detect_hands_task( cam_data,hands, stop_event, img_depth_pipe, detected_hand
     hand_detector = hd.Hands3DDetector(cam_data, hands = hands, running_mode =
                                             hd.Hands3DDetector.LIVE_STREAM_MODE)
     while True:
+        t = time.time()
         if stop_event.is_set():
             break
         
@@ -53,11 +57,13 @@ def detect_hands_task( cam_data,hands, stop_event, img_depth_pipe, detected_hand
             detected_hands_pipe.send(output)
             # print('detect_hands_task: sent hands')
         # print('detect_hands_task: updated hands')
+        print(f'detect_hands_task: {(time.time()-t)*1000:.2f} ms')
     hand_detector.stop()
 
 def detect_objects_task(cam_data, stop_event, detect_event, img_pipe, detected_objects_pipe):
     object_detector = o2d.get_object_detector("ycbv", cam_data)
     while True:
+        t = time.time()
         if stop_event.is_set():
             break
         detect_flag = detect_event.wait(0.5)
@@ -78,6 +84,7 @@ def detect_objects_task(cam_data, stop_event, detect_event, img_pipe, detected_o
                 # print('detect_objects_task: sent detected objects')
                 detect_event.clear()
         # print('detect_objects_task: updated objects')
+        print(f'detect_objects_task: {(time.time()-t)*1000:.2f} ms')
     object_detector.stop()
         
 def estimate_objects_task(cam_data, stop_event, img_pipe, object_detections_pipe, estimated_objects_pipe):
@@ -86,6 +93,7 @@ def estimate_objects_task(cam_data, stop_event, img_pipe, object_detections_pipe
                                                         use_tracking = True,
                                                         fuse_detections=False)
     while True:
+        t = time.time()
         if stop_event.is_set():
             break
         if img_pipe.poll():
@@ -112,6 +120,7 @@ def estimate_objects_task(cam_data, stop_event, img_pipe, object_detections_pipe
             # print('estimate_objects_task: sent estimated objects')
             # print(estimated_objects)
         # print('estimate_objects_task: updated estimated objects')
+        print(f'estimate_objects_task: {(time.time()-t)*1000:.2f} ms')
         
     object_pose_estimator.stop()
         
@@ -144,11 +153,12 @@ class GraspingDetector:
         
     
     def run(self):
+        tracemalloc.start()
         multiprocessing.set_start_method('spawn', force=True)
         dataset = "ycbv"
         rgbd_cam = rgbd.RgbdCamera()
         cam_data = rgbd_cam.get_device_data()
-        hands = ['right']
+        hands = ['left']
         
         
         plotter = pl.NBPlot()
@@ -223,6 +233,7 @@ class GraspingDetector:
                 # print(f'updated img for objects estimation')
             
             # SCENE
+            t = time.time()
             detected_hands = None
             while out_hands.poll():
                 detected_hands = out_hands.recv()['hands']
@@ -230,8 +241,10 @@ class GraspingDetector:
                 # print(detected_hands)
             if detected_hands is not None:
                 scene.update_hands(detected_hands)
+                print(f'scene update hands: {(time.time()-t)*1000:.2f} ms')
                 # print(f'updated hands')
-                
+            
+            t = time.time()
             estimated_objects = None
             # print('waiting for estimated objects')
             # print(out_object_estimation.poll())
@@ -242,13 +255,20 @@ class GraspingDetector:
             # print('finished waiting for estimated objects')
             if estimated_objects is not None:
                 scene.update_objects(estimated_objects)
+                print(f'scene update objects: {(time.time()-t)*1000:.2f} ms')
                 # print(f'updated estimated objects')
             k = cv2.waitKey(1)
+            t = time.time()
             scene.render(img)
+            print(f'scene render: {(time.time()-t)*1000:.2f} ms')
             cv2.imshow('render_img', img)
             if k == 27:
                 print('end')
                 break
+            print('-------------------')
+            current, peak = tracemalloc.get_traced_memory()
+            print(f"Current memory usage is {current / 10**6}MB; Peak was {peak / 10**6}MB")
+        tracemalloc.stop()
         stop_event.set()
         process_hands_detection.join()
         process_object_detection.join()

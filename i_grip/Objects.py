@@ -153,11 +153,17 @@ class RigidObject(Entity):
 
     
     def update(self, new_prediction, timestamp = None):
+        # t = time.time()
         self.state.update(new_prediction.pose, timestamp = timestamp)
+        # print(f'object update time : {(time.time()-t)*1000:.2f}ms')
+        # t = time.time()
         self.render_box.update_coordinates(new_prediction.render_box)
+        # print(f'object update render box time : {(time.time()-t)*1000:.2f}ms')
+        # t = time.time()
         if self.nb_updates <=15:
             self.nb_updates+=2
         self.update_trajectory()
+        # print(f'object update trajectory time : {(time.time()-t)*1000:.2f}ms')
         self.set_mesh_updated(False)
     
     def update_pose(self, translation_vector, quaternion):
@@ -303,7 +309,8 @@ class RigidObjectState(State):
         self.last_timestamp = timestamp
     
     def propagate(self, timestamp):
-        self.last_timestamp = timestamp
+        # self.last_timestamp = timestamp
+        pass
         #TODO: propagate pose for tracking moving objects
     
     def as_list(self, timestamp=True, pose=True, pose_filtered=False):

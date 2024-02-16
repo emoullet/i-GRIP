@@ -134,11 +134,13 @@ class RealTimeWindow(DataWindow):
             self.extrapolated_timestamps = np.arange(0, 0.3, 0.01)
             self.extrapolated_data = np.polynomial.polynomial.polyval(self.extrapolated_timestamps, self.poly_coeffs)
     
-    def analyse(self):
-        self.interpolate()
-        self.extrapolate()
-        self.differentiate()
-        pass
+    def analyse(self, interpolate = True, differentiate = True, extrapolate = True):
+        if interpolate:
+            self.interpolate()
+        if differentiate:
+            self.differentiate()
+        if extrapolate:
+            self.extrapolate()
         
     def get_mean_derivative(self, sub_window_size = 5):
         if self.der_data is None:
@@ -630,11 +632,13 @@ class Target(Timed):
         t = time.time()
         # (_, distances, _) = self.object.mesh.nearest.on_surface(hand_pos_obj_frame.reshape(1,3))
         # new_distance = distances[0]
-        new_distance = - self.signed_distance_finder(hand_pos_obj_frame.reshape(1,3))
+        new_distance = -self.signed_distance_finder(hand_pos_obj_frame.reshape(1,3))[0]
+        print(type(new_distance))
+        print('new_distance', new_distance)
+        self.distance_to_hand = new_distance
         # new_distance = 100
         print(f'compute time for distance {(time.time()-t)*1000} ms')
         # print('new_distance', new_distance)
-        self.distance_to_hand = new_distance
         # print('label', self.obj_label, 'new_distance', new_distance, 'elapsed', elapsed)
         self.distance_window.queue((new_distance, self.get_elapsed()))
     
@@ -702,10 +706,10 @@ class Target(Timed):
     def analyse(self):
         # print('analyse target', self.object.label, self.hand_label)
         self.distance_window.analyse()
-        self.time_to_target_distance_window.analyse()
-        self.time_to_target_impacts_window.analyse()
+        # self.time_to_target_distance_window.analyse()
+        # self.time_to_target_impacts_window.analyse()
         self.compute_time_before_impact_distance()
-        self.compute_time_before_impact_zone()
+        # self.compute_time_before_impact_zone()
         self.distance_mean_derivative = -self.distance_window.get_mean_derivative()
         self.distance_mean_derivative_window.queue((self.distance_mean_derivative, self.elapsed), time_type='elapsed')
         if self.predicted_impact_zone is not None:
@@ -726,9 +730,9 @@ class Target(Timed):
 
     def get_time_of_impact(self, unit = 'ms'):
         if unit == 'ms':
-            return int(self.time_before_impact_zone*1000)
+            return int(self.time_before_impact_distance*1000)
         if unit == 's':
-            return int(self.time_before_impact_zone)
+            return int(self.time_before_impact_distance)
     
     def find_grip(self):
         if abs(self.predicted_impact_zone.v[0])>20:
@@ -740,7 +744,7 @@ class Target(Timed):
         return self.grip
     
     def get_info(self):
-        return self.object.name, self.grip, self.time_before_impact_zone, self.ratio
+        return self.object.name, self.grip, self.time_before_impact_distance, self.ratio
 
     def get_plots(self):      
         
@@ -797,7 +801,11 @@ class Target(Timed):
                         plot_type='',
                         plot_target = 'Time to impact')
         to_plots.append(to_plot_time_to_target_distance)
-        
+        x = self.time_to_target_distance_window.timestamps
+        y = self.time_to_target_distance_window.data
+        print(f'time to target distance {x} {y}')   
+        print(f'time to target distane {len(x)} {len(y)}')
+        # print(f'shape {x.shape} {y.shape}')
         to_plot_mean_derivative = dict(color = self.color,
                         label = self.label,
                         hand_label = self.hand_label, 
