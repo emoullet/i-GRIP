@@ -3,10 +3,10 @@ import cv2
 import numpy as np
 import math
 import time
+from i_grip.config import _MEDIAPIPE_MODEL_PATH
 
 class Hands3DDetector:
     
-    _MEDIAPIPE_MODEL_PATH = '/home/emoullet/Mediapipe2/hand_landmarker_aout23.task'
     LIVE_STREAM_MODE = 'LIVE_STREAM'
     VIDEO_FILE_MODE = 'VIDEO'
     _HANDS_MODE = ['left', 'right']
@@ -112,16 +112,26 @@ class HandPrediction:
         self.normalized_landmarks = np.array([[1-l.x,l.y,l.z] for l in landmarks])
         # self.landmarks = np.array([[max(min(1-l.x,1.),0.)*img_res[0], max(min(l.y,1.),0.)*img_res[1], l.z] for l in landmarks])
         # self.normalized_landmarks = landmarks
-        self.normalized_world_landmarks = world_landmarks
+        # print('landmarks', landmarks)
+        # print('world_landmarks', world_landmarks)
+        self.world_landmarks = np.array([[-l.x,-l.y,l.z] for l in world_landmarks])*1000
+        # print('self.world_landmarks', self.world_landmarks)
         # self.world_landmarks = np.array([[l.x*img_res[0], l.y*img_res[1], l.z] for l in world_landmarks])
         self.label = handedness[0].category_name.lower()
-        self.position, self.roi = stereo_inference.calc_spatials(self.hand_point(), depth_map)
+        hand_point2D, hand_point3D = self.hand_point()
+        self.position, self.roi = stereo_inference.calc_spatials(hand_point2D, depth_map)
+        #add self.position to every world_landmarks lines
+        hand_center = self.position.copy()
+        # hand_center[1] = -hand_center[1]
+        self.world_landmarks = self.world_landmarks + hand_center - hand_point3D
         # self.position = self.position/1000
         
     def hand_point(self):
-        hand_point = self.normalized_landmarks[0,:] # wrist
-        hand_point = (self.normalized_landmarks[0,:]+self.normalized_landmarks[5,:]+self.normalized_landmarks[17,:])/3 # wrist, index finger and pinky baricenter
-        return hand_point
+        # hand_point2D = self.normalized_landmarks[0,:] # wrist
+        # hand_point3D = self.world_landmarks[0,:] # wrist
+        hand_point2D = (self.normalized_landmarks[0,:]+self.normalized_landmarks[5,:]+self.normalized_landmarks[17,:])/3 # wrist, index finger and pinky baricenter
+        hand_point3D = (self.world_landmarks[0,:]+self.world_landmarks[5,:]+self.world_landmarks[17,:])/3 # wrist, index finger and pinky baricenter
+        return hand_point2D, hand_point3D
 
     def get_landmarks(self):
         return self.normalized_landmarks

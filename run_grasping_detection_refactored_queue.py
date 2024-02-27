@@ -169,7 +169,7 @@ class GraspingDetector:
         multiprocessing.set_start_method('spawn', force=True)
         rgbd_cam = rgbd.RgbdCamera(fps=40)
         cam_data = rgbd_cam.get_device_data()
-        hands = ['left']
+        hands = ['right']
         
         stop_event = multiprocessing.Event()
         detect_event = multiprocessing.Event()

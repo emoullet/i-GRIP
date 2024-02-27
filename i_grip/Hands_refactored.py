@@ -9,6 +9,7 @@ from mediapipe.framework.formats import landmark_pb2
 
 from i_grip.utils2 import *
 from i_grip import Hands3DDetectors as hd
+from typing import List, Mapping, Optional, Tuple, Union
 # from i_grip.HandDetectors2 import HandPrediction
 
 
@@ -235,6 +236,7 @@ class GraspingHand(Entity):
         self.hand_pos_obj_frame = {}
         self.impact_locations_list = {}
         self.rays_vizualize_list = {}
+        self.full_hand = True
         self.define_mesh_representation()
         self.update_mesh()
         self.most_probable_target = None
@@ -268,7 +270,20 @@ class GraspingHand(Entity):
             self.text_color=[100,0,0]
             self.plot_color = 'blue'
             self.future_color = [0,255,255,255]
+            
+        if self.full_hand:
+            self.mesh_key_points = [tm.primitives.Sphere(radius = 7) for i in range(21)]
+            mp_specs = solutions.drawing_styles.get_default_hand_landmarks_style()
+            for i in range(21):                
+                drawing_spec = mp_specs[i] if isinstance(
+                    mp_specs, Mapping) else mp_specs
+                color = drawing_spec.color
+                self.mesh_key_points[i].visual.face_colors = [color[0], color[1], color[2], 255]
+            self.key_points_key_points_connections=solutions.hands.HAND_CONNECTIONS
+            self.key_points_connections_path = tm.load_path(np.zeros((2,2,3)))
     
+    def get_keypoints_representation(self):
+        return self.key_points_mesh_transforms, self.key_points_connections_path
     
     def update(self, detected_hand):
         self.detected_hand = detected_hand
@@ -308,8 +323,21 @@ class GraspingHand(Entity):
         self.mesh_position = Position(self.state.position_filtered*np.array([-1,1,1]))
         # self.mesh_position = Position(self.state.velocity_filtered*np.array([-1,1,1])+np.array([0,0,500]))
         self.mesh_transform= tm.transformations.compose_matrix(translate = self.mesh_position.v)
+        if self.full_hand:
+            print(f"self.state.world_landmarks : {self.state.world_landmarks}")
+            self.key_points_mesh_transforms = [tm.transformations.compose_matrix(translate = self.state.world_landmarks[i]*np.array([-1,1,1])) for i in range(21)]
+            # print(f'connections : {self.key_points_key_points_connections}')
+            # start_indexes = [connection[0] for connection in self.key_points_key_points_connections]
+            # end_indexes = [connection[1] for connection in self.key_points_key_points_connections]
+            # for connection in self.key_points_key_points_connections:
+            #     start_indexes
+            self.key_points_connections_path_starts = np.vstack([self.state.world_landmarks[connection[0]]*np.array([-1,1,1]) for connection in self.key_points_key_points_connections])
+            self.key_points_connections_path_ends = np.vstack([self.state.world_landmarks[connection[1]]*np.array([-1,1,1]) for connection in self.key_points_key_points_connections])
+            self.key_points_connections_path = tm.load_path(np.hstack((self.key_points_connections_path_starts, self.key_points_connections_path_ends)).reshape(-1, 2, 3)) 
         self.set_mesh_updated(True)
     
+    def get_keypoints_representation(self):
+        return self.key_points_mesh_transforms, self.key_points_connections_path
     
     def get_mesh_position(self):
         return self.mesh_position.v
@@ -398,16 +426,19 @@ class GraspingHand(Entity):
         return self.targets_data
         
 class GraspingHandState(State):
-    def __init__(self,  position=None, normalized_landmarks=None,  timestamp = None, trajectory = None) -> None:
+    def __init__(self,  position=None, normalized_landmarks=None, world_landmarks = None,  timestamp = None, trajectory = None) -> None:
         super().__init__()
         self.position_raw = Position(position)
         self.normalized_landmarks = normalized_landmarks
+        print(f'buiding hand state with world_landmarks : {world_landmarks}')
+        self.world_landmarks = world_landmarks
         # if landmarks is None:
         #     self.landmarks = np.zeros((21,3))
         # else:
         #     self.landmarks = landmarks
         self.new_position = self.position_raw
         self.new_normalized_landmarks = self.normalized_landmarks
+        self.new_world_landmarks = self.world_landmarks
         
         self.velocity_raw = np.array([0,0,0])
         self.scalar_velocity = 0
@@ -440,7 +471,7 @@ class GraspingHandState(State):
         
     @classmethod
     def from_hand_detection(cls, hand_detection: hd.HandPrediction, timestamp = 0):
-        return cls(hand_detection.position, hand_detection.normalized_landmarks, timestamp)
+        return cls(hand_detection.position, hand_detection.normalized_landmarks, hand_detection.world_landmarks, timestamp)
     
     @classmethod
     def from_position(cls, position: Position, timestamp = 0):
@@ -468,10 +499,14 @@ class GraspingHandState(State):
     def update_normalized_landmarks(self, normalized_landmarks):
         self.new_normalized_landmarks = normalized_landmarks
     
+    def update_world_landmarks(self, world_landmarks):
+        self.new_world_landmarks = world_landmarks
+    
     def update(self, new_input):
         if isinstance(new_input, hd.HandPrediction):
             self.update_position(new_input.position)
             self.update_normalized_landmarks(new_input.normalized_landmarks)
+            self.update_world_landmarks(new_input.world_landmarks)
         elif isinstance(new_input, Position):
             self.update_position(new_input)
         elif new_input is None:
@@ -487,9 +522,12 @@ class GraspingHandState(State):
         self.propagate_position(elapsed)
         if self.normalized_landmarks is not None:
             self.propagate_normalized_landmarks(elapsed)
+        if self.world_landmarks is not None:
+            self.propagate_world_landmarks(elapsed) 
         self.set_updated(False)
         self.set_propagated(True)
         print(f'propagated hand position : {self.position_raw, self.last_timestamp}')
+        print(f'propgated hand world landmarks : {self.world_landmarks}')
         
     def propagate_position(self, elapsed):
         if not  self.was_updated():
@@ -522,6 +560,8 @@ class GraspingHandState(State):
         self.compute_velocity()
         if self.normalized_landmarks is not None:
             self.propagate_normalized_landmarks(elapsed)
+        if self.world_landmarks is not None:
+            self.propagate_world_landmarks(elapsed) 
         self.compute_future_points()
         self.set_updated(False)
         self.set_propagated(True)
@@ -604,6 +644,8 @@ class GraspingHandState(State):
             
         self.normalized_landmarks = next_normalized_landmarks
     
+    def propagate_world_landmarks(self, elapsed):
+        self.world_landmarks = self.new_world_landmarks
     
     def get_movement_direction(self):
         point_down_factor = -0.3

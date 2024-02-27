@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import trimesh as tm
-import pyfqmr
+import os
 import cv2
 import time
 
@@ -9,6 +9,7 @@ from i_grip.utils2 import Bbox, State, Trajectory, Pose, Entity
 from i_grip import ObjectPoseEstimators as ope
 import matplotlib.colors as mcolors
 
+from i_grip.config import _TLESS_MESH_PATH, _YCVB_MESH_PATH, _TLESS_URDF_PATH, _YCVB_URDF_PATH
 class RigidObjectTrajectory(Trajectory):
     
     DEFAULT_DATA_KEYS = [ 'Timestamps', 'x', 'y', 'z', 'qx', 'qy', 'qz', 'qw', 'Extrapolated']
@@ -43,10 +44,10 @@ class RigidObject(Entity):
     _TARGETS_COLORS = ['green',  'orange', 'purple', 'pink', 'brown', 'grey', 'black']
     _OBJECTS_COLORS = [mcolors.to_rgba(c) for c in _TARGETS_COLORS]
     
-    _TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad'
-    _YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models'
-    _TLESS_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/tless.cad/'
-    _YCVB_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/ycbv/'
+    # _TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad'
+    # _YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models'
+    # _TLESS_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/tless.cad/'
+    # _YCVB_URDF_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/urdfs/ycbv/'
     
     # def __init__(self, dataset = 'tless',  label = None, pose=None, score = None, render_box=None, timestamp = None, trajectory = None) -> None:
     def __init__(self, input,  timestamp = None, dataset = None, label = None, index = 0) -> None:
@@ -82,11 +83,11 @@ class RigidObject(Entity):
             
         self.dataset = dataset
         if(dataset == "ycbv"):
-            self.mesh_path = RigidObject._YCVB_MESH_PATH
-            self.urdf_path = RigidObject._YCVB_URDF_PATH
+            self.mesh_path = str(_YCVB_MESH_PATH)
+            self.urdf_path = str(_YCVB_URDF_PATH)
         elif(dataset == "tless"):
-            self.mesh_path = RigidObject._TLESS_MESH_PATH
-            self.urdf_path = RigidObject._TLESS_URDF_PATH
+            self.mesh_path = str(_TLESS_MESH_PATH)
+            self.urdf_path = str(_TLESS_URDF_PATH)
         else:
             raise ValueError('dataset must be either ycbv or tless')
         print(f'mesh path : {self.mesh_path}')
@@ -94,12 +95,11 @@ class RigidObject(Entity):
         self.mesh_color = RigidObject._OBJECTS_COLORS[index]
         self.default_color = (0, 255, 0)
         
-        self.simplify = False
-        if self.dataset == 'tless':
-            self.load_simplified = True
-        else:
-            self.load_simplified = True
-            
+        self.load_simplified = True
+        if self.load_simplified:
+            if not os.path.exists(self.mesh_path+'_simplified'):
+                print('simplified meshes not found, falling back to original meshes')
+                self.load_simplified = False
         self.load_mesh()
         self.update_mesh()
         
@@ -133,12 +133,6 @@ class RigidObject(Entity):
             else:
                 self.mesh = tm.load_mesh(self.mesh_path+'/'+self.label+'.ply')
                 print('MESH LOADED : ' + self.mesh_path+'/'+self.label+'.ply')
-            if self.simplify:
-                mesh_simplifier = pyfqmr.Simplify()
-                mesh_simplifier.setMesh(self.mesh.vertices,self.mesh.faces)
-                mesh_simplifier.simplify_mesh(target_count = 1000, aggressiveness=7, preserve_border=True, verbose=10)
-                v, f, n = mesh_simplifier.getMesh()
-                self.mesh = tm.Trimesh(vertices=v, faces=f, face_normals=n, face_colors=self.mesh_color)
             self.mesh.visual.face_colors = self.mesh_color
             print(len(self.mesh.vertices))
         except:

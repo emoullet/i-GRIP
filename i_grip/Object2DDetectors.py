@@ -1,16 +1,12 @@
 #!/usr/bin/env python3
 import torch
 import os
-import threading
 import numpy as np
-from i_grip.image_utils import make_cameras
-from i_grip.model_utils import load_detector, load_pose_predictor
+from i_grip.model_utils import load_detector
 from cosypose.utils.tensor_collection import PandasTensorCollection,  fuse
 import cv2
 import torch.multiprocessing as mp
-
-_TLESS_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/tless/models_cad/'
-_YCVB_MESH_PATH = '/home/emoullet/Documents/DATA/cosypose/local_data/bop_datasets/ycbv/models/'
+from i_grip.config import _YCVB_MESH_PATH, _TLESS_MESH_PATH
 
 mp = mp.get_context('spawn')
 class Object2DDetector:

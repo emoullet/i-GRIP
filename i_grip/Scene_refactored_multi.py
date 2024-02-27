@@ -182,6 +182,9 @@ class Scene :
         new_hand = GraspingHand(label=label, input = input, timestamp = timestamp, plotter=self.plotter)
         self.hands[label] = new_hand
         self.new_hand_meshes.append({'mesh' : self.hands[label].mesh_origin, 'name': label})
+        if new_hand.full_hand:
+            for i, key_point in enumerate(new_hand.mesh_key_points):
+                self.new_hand_meshes.append({'mesh' : key_point, 'name': label+'_keypoint_'+str(i)})
         
         self.target_detectors[label] = TargetDetector(new_hand, plotter= self.plotter)
         
@@ -304,6 +307,12 @@ class Scene :
         for label, hand in hands:      
             hand.update_mesh()       
             scene.graph.update(label,matrix = hand.get_mesh_transform(), geometry = label)
+            if hand.full_hand:
+                tfs, paths = hand.get_keypoints_representation()
+                for i  in range(len(hand.mesh_key_points)):
+                    scene.graph.update(label+'_keypoint_'+str(i), matrix = tfs[i], geometry = label+'_keypoint_'+str(i))
+                scene.delete_geometry(label+'_keypoint_connection_paths')
+                scene.add_geometry(paths, geom_name=label+'_keypoint_connection_paths')
 
     def update_object_meshes(self, scene):     
         objects_to_delete = self.objects_to_delete.copy().keys()
