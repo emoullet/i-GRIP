@@ -9,7 +9,7 @@ from mediapipe.framework.formats import landmark_pb2
 
 from i_grip.utils2 import *
 from i_grip import Hands3DDetectors as hd
-from typing import List, Mapping, Optional, Tuple, Union
+from typing import  Mapping
 # from i_grip.HandDetectors2 import HandPrediction
 
 
@@ -30,14 +30,6 @@ class GraspingHandTrajectory(Trajectory):
         if fit_method == 'np_poly':
             self.fit = self.polynomial_fit
             self.extrapolate = self.np_poly_extrapolate
-        elif fit_method == 'skl_spline':
-            self.model = make_pipeline(SplineTransformer(n_knots=2, degree=2, extrapolation='continue'), Ridge(alpha=1e-3))
-            self.fit = self.skl_fit
-            self.extrapolate = self.skl_extrapolate
-        elif fit_method == 'skl_poly':
-            self.model = make_pipeline(PolynomialFeatures(2), Ridge(alpha=1e-3))
-            self.fit = self.skl_fit
-            self.extrapolate = self.skl_extrapolate
             
     @classmethod
     def from_dataframe(cls, df: pd.DataFrame, headers_list=DEFAULT_DATA_KEYS, attributes_dict=None, limit_size=None):

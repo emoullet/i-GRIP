@@ -28,14 +28,6 @@ class HandConeImpactsWindow(DataWindow):
         super().__init__(size, label)
         self.nb_impacts = 0
 
-    # def mean(self):
-    #     if self.nb_samples==0:
-    #         return None
-    #     sum = 0
-    #     for i in range(self.data):
-    #         sum+=np.mean(self.data[i])
-    #     return sum/self.nb_samples
-
     def multi_queue(self, new_data):
         for data in new_data:
             self.queue(data)

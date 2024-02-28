@@ -53,8 +53,8 @@ def detect_hands_task( cam_data,hands, stop_event, img_depth_queue, detected_han
         print(f'detect_hands_task: {(time.time()-t)*1000:.2f} ms')
     hand_detector.stop()
 
-def detect_objects_task(cam_data, stop_event, detect_event, img_queue, detected_objects_queue):
-    object_detector = o2d.get_object_detector("ycbv", cam_data)
+def detect_objects_task(dataset, cam_data, stop_event, detect_event, img_queue, detected_objects_queue):
+    object_detector = o2d.get_object_detector(dataset, cam_data)
     while True:
         t = time.time()
         if stop_event.is_set():
@@ -77,8 +77,8 @@ def detect_objects_task(cam_data, stop_event, detect_event, img_queue, detected_
         print(f'detect_objects_task: {(time.time()-t)*1000:.2f} ms')
     object_detector.stop()
         
-def estimate_objects_task(cam_data, stop_event, img_queue, object_detections_queue, estimated_objects_queue):
-    object_pose_estimator = ope.get_pose_estimator("ycbv",
+def estimate_objects_task(dataset, cam_data, stop_event, img_queue, object_detections_queue, estimated_objects_queue):
+    object_pose_estimator = ope.get_pose_estimator(dataset,
                                                         cam_data,
                                                         use_tracking = True,
                                                         fuse_detections=False)
@@ -160,16 +160,20 @@ def scene_analysis_task(cam_data, stop_event, detect_event, img_queue, hands_que
     stop_event.set()
         
 class GraspingDetector:
-    def __init__(self, ) -> None:
-        self.dataset = "ycbv"
-        
+    def __init__(self, hands, dataset, fps, images) -> None:
+        if hands == 'both':
+            self.hands = ['left', 'right']
+        else:
+            self.hands = [hands]
+        self.dataset = dataset
+        self.fps = fps
+        self.obj_images = images
     
     def run(self):
         tracemalloc.start()
         multiprocessing.set_start_method('spawn', force=True)
-        rgbd_cam = rgbd.RgbdCamera(fps=40)
+        rgbd_cam = rgbd.RgbdCamera(fps=self.fps)
         cam_data = rgbd_cam.get_device_data()
-        hands = ['left', 'right']
         
         stop_event = multiprocessing.Event()
         detect_event = multiprocessing.Event()
@@ -185,13 +189,13 @@ class GraspingDetector:
         queue_object_estimation = multiprocessing.Queue(maxsize=1)
         
         process_hands_detection = multiprocessing.Process(target=detect_hands_task, 
-                                                          args=(cam_data, hands, stop_event, queue_rgbd_frame_hands, queue_hands,))
+                                                          args=(cam_data, self.hands, stop_event, queue_rgbd_frame_hands, queue_hands,))
         
         process_object_detection = multiprocessing.Process(target=detect_objects_task, 
-                                                           args=(cam_data, stop_event, detect_event, queue_rgb_frame_object_detection, queue_object_detection,))
+                                                           args=(self.dataset, cam_data, stop_event, detect_event, queue_rgb_frame_object_detection, queue_object_detection,))
         
         process_object_estimation = multiprocessing.Process(target=estimate_objects_task, 
-                                                            args=(cam_data, stop_event, queue_rgb_frame_object_estimation, queue_object_detection, queue_object_estimation,))
+                                                            args=(self.dataset,cam_data, stop_event, queue_rgb_frame_object_estimation, queue_object_detection, queue_object_estimation,))
         
         process_scene_analysis = multiprocessing.Process(target=scene_analysis_task, 
                                                         args=(cam_data, stop_event, detect_event, queue_rgb_frame_scene_analysis,queue_hands, queue_object_estimation))
@@ -209,6 +213,12 @@ class GraspingDetector:
         obj_img = cv2.resize(obj_img, (int(obj_img.shape[1]/2), int(obj_img.shape[0]/2)))
         obj_img2 = cv2.imread(obj_path2)
         obj_img2 = cv2.resize(obj_img2, (int(obj_img2.shape[1]/2), int(obj_img2.shape[0]/2)))
+        
+        obj_imgs = []
+        for img in self.obj_images:
+            obj_img = cv2.imread(img)
+            obj_img = cv2.resize(obj_img, (int(obj_img.shape[1]/2), int(obj_img.shape[0]/2)))
+            obj_imgs.append(obj_img)
         
         detect_event.set()
         
@@ -229,9 +239,16 @@ class GraspingDetector:
                 rgbd_frame = (img_for_hands, depth_map)
                 queue_rgbd_frame_hands.put(rgbd_frame)
             
-            # OBJECTS
-            img[0:obj_img.shape[0], 0:obj_img.shape[1]] = obj_img
-            img[0:obj_img2.shape[0], img.shape[1]-obj_img2.shape[1]:] = obj_img2
+            # OBJECTS INSERTION
+            for i, obj_img in enumerate(obj_imgs):
+                if i == 0:
+                    img[0:obj_img.shape[0], 0:obj_img.shape[1]] = obj_img
+                elif i == 1:
+                    img[0:obj_img.shape[0], img.shape[1]-obj_img.shape[1]:] = obj_img
+                elif i == 2:
+                    img[img.shape[0]-obj_img.shape[0]:, 0:obj_img.shape[1]] = obj_img
+                elif i == 3:
+                    img[img.shape[0]-obj_img.shape[0]:, img.shape[1]-obj_img.shape[1]:] = obj_img
             
             # OBJECT DETECTION
             if detect_event.is_set():                
@@ -275,10 +292,12 @@ class GraspingDetector:
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-hd', '--hand_detection', choices=['mediapipe', 'depthai', 'hybridOAKMediapipe'],
-                        default = 'hybridOAKMediapipe', help="Hand pose reconstruction solution")
-    parser.add_argument('-od', '--object_detection', choices=['cosypose, megapose'],
-                        default = 'cosypose', help="Object pose reconstruction detection")
+    parser.add_argument('-ha', '--hands', choices=['left', 'right', 'both'],
+                        default = 'both', help="Hands to analyse for grasping intention detection")
+    parser.add_argument('-d', '--dataset', choices=['t_less, ycbv'],
+                        default = 'ycbv', help="Cosypose dataset to use for object detection and pose estimation")
+    parser.add_argument('-f', '--fps', type=int, default=40, help="Frames per second for the camera")
+    parser.add_argument('-i', '--images', nargs='+', help="Path to the image(s) to use for object detection", default=['./YCBV_test_pictures/javel.png', './YCBV_test_pictures/mustard_front.png'])
     args = vars(parser.parse_args())
 
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -286,6 +305,6 @@ if __name__ == '__main__':
     print('start')
     report_gpu()
     kill_gpu_processes()
-    i_grip = GraspingDetector()
+    i_grip = GraspingDetector(**args)
     i_grip.run()
 

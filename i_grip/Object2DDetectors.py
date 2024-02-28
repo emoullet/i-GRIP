@@ -3,7 +3,6 @@ import torch
 import os
 import numpy as np
 from i_grip.model_utils import load_detector
-from cosypose.utils.tensor_collection import PandasTensorCollection,  fuse
 import cv2
 import torch.multiprocessing as mp
 from i_grip.config import _YCVB_MESH_PATH, _TLESS_MESH_PATH

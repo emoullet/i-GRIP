@@ -6,13 +6,8 @@ import time
 import cv2
 import numpy as np
 import trimesh as tm
-import pyfqmr
 import pyglet
 
-import matplotlib
-# matplotlib.use('TkAgg')
-import matplotlib.pyplot as plt
-import matplotlib.animation as animation
 
 from i_grip.utils2 import *   
 # from i_grip.Hands import GraspingHand

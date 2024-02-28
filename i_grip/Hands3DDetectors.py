@@ -19,7 +19,8 @@ class Hands3DDetector:
                 raise ValueError(f'hand must be one of {self._HANDS_MODE}')
         self.hands_to_detect = hands
         self.num_hands = len(hands)
-        
+        # print("GPU available:", mp.python._pywrap_util.is_gpu_available())
+
         
         if running_mode not in [self.LIVE_STREAM_MODE, self.VIDEO_FILE_MODE]:
             raise ValueError(f'running_mode must be one of {self.LIVE_STREAM_MODE} or {self.VIDEO_FILE_MODE}')
@@ -27,13 +28,14 @@ class Hands3DDetector:
         if running_mode == self.LIVE_STREAM_MODE:
             self.get_hands = self.get_hands_live_stream
             self.landmarker_options = mp.tasks.vision.HandLandmarkerOptions(
-                base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path),
+                base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path,
+                delegate = mp.tasks.BaseOptions.Delegate.GPU),
                 running_mode=mp.tasks.vision.RunningMode.LIVE_STREAM,
                 num_hands=self.num_hands,
                 min_hand_presence_confidence=0.4,
                 min_hand_detection_confidence=0.4,
                 min_tracking_confidence=0.4,
-                result_callback=self.extract_hands
+                result_callback=self.extract_hands,
             )
         elif running_mode == self.VIDEO_FILE_MODE:
             self.get_hands = self.get_hands_video
@@ -93,13 +95,13 @@ class Hands3DDetector:
         # if frame is not None and depthFrame is not None:
             # mp_frame = cv2.cvtColor(cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
             # mp_frame = cv2.cvtColor(cv2.flip(frame,1), cv2.COLOR_BGR2RGB)
-            mp_frame = cv2.flip(frame,1)
+            # mp_frame = cv2.flip(frame,1)
             # print('frame.shape', frame.shape)
             # print(frame)
             # mp_frame=self.frame
             frame_timestamp_ms = round(time.time()*1000)
             # print('frame_timestamp_ms', frame_timestamp_ms)
-            mp_image = mp.Image(image_format=self.format, data=mp_frame)
+            mp_image = mp.Image(image_format=self.format, data=frame)
             self.depth_map = depth_frame
             self.landmarker.detect_async(mp_image, frame_timestamp_ms)
             self.new_frame = False
@@ -109,12 +111,12 @@ class Hands3DDetector:
 class HandPrediction:
     def __init__(self, handedness, landmarks, world_landmarks, depth_map, stereo_inference) -> None:
         self.handedness = handedness
-        self.normalized_landmarks = np.array([[1-l.x,l.y,l.z] for l in landmarks])
+        self.normalized_landmarks = np.array([[l.x,l.y,l.z] for l in landmarks])
         # self.landmarks = np.array([[max(min(1-l.x,1.),0.)*img_res[0], max(min(l.y,1.),0.)*img_res[1], l.z] for l in landmarks])
         # self.normalized_landmarks = landmarks
         # print('landmarks', landmarks)
         # print('world_landmarks', world_landmarks)
-        self.world_landmarks = np.array([[-l.x,-l.y,l.z] for l in world_landmarks])*1000
+        self.world_landmarks = np.array([[l.x,-l.y,l.z] for l in world_landmarks])*1000
         # print('self.world_landmarks', self.world_landmarks)
         # self.world_landmarks = np.array([[l.x*img_res[0], l.y*img_res[1], l.z] for l in world_landmarks])
         self.label = handedness[0].category_name.lower()

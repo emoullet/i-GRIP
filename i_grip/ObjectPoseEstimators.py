@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 from i_grip.image_utils import make_cameras
 from i_grip.model_utils import load_pose_predictor
-from cosypose.utils.tensor_collection import PandasTensorCollection,  fuse
+from cosypose.utils.tensor_collection import PandasTensorCollection
 
 
 class KnownObjectPoseEstimator:

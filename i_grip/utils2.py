@@ -9,7 +9,7 @@ import pandas as pd
 import os
 # from i_grip.HandDetectors2 import HandPrediction
 from i_grip.Filters import LandmarksSmoothingFilter
-from findiff import FinDiff
+# from findiff import FinDiff
 # import pynumdiff
 from scipy.interpolate import CubicSpline
 import trimesh as tm
