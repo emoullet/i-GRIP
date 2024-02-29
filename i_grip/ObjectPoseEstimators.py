@@ -12,6 +12,7 @@ from cosypose.utils.tensor_collection import PandasTensorCollection
 class KnownObjectPoseEstimator:
     def __init__(self, dataset, cam_data, render_txt =False, render_overlay = False, render_bboxes = True, 
                     use_tracking = True, fuse_detections = True):
+        print('Building KnownObjectPoseEstimator')
         cam_mat = cam_data['matrix']
         img_resolution = cam_data['resolution']
         self.render_txt = render_txt
@@ -60,6 +61,7 @@ class KnownObjectPoseEstimator:
         else:
             self.predict = self.pose_predictor.get_predictions
         self.reset()
+        print('KnownObjectPoseEstimator built')
         
     def reset(self):
         self.pose_estimation_prior = None

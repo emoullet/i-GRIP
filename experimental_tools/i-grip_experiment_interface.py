@@ -3,6 +3,7 @@ import shutil
 import tkinter as tk
 from tkinter import ttk, font
 from tkinter import filedialog, messagebox
+import multiprocessing
 # from ttkbootstrap import Style
 import pandas as pd
 # import ExperimentReplayer2 as erp
@@ -865,7 +866,7 @@ if __name__ == "__main__":
     kill_gpu_processes()
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'analysis', help="Mode of the interface")
+    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'replay', help="Mode of the interface")
     args = vars(parser.parse_args())
     if args['mode'] == 'record':
         interface = ExperimentRecordingInterface()
@@ -877,4 +878,5 @@ if __name__ == "__main__":
         interface = ExperimentAnalysisInterface()
     else:
         raise ValueError(f"Mode {args['mode']} not recognized")
+    multiprocessing.set_start_method('spawn', force=True)
     interface.start()

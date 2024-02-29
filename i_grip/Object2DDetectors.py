@@ -12,7 +12,7 @@ class Object2DDetector:
     def __init__(self, dataset,
                  cam_data,
                  detection_threshold=0.8):
-        
+        print('Building Object2DDetector')
         self.dataset = dataset
         if(dataset == "ycbv"):
             object_detector_run_id = 'detector-bop-ycbv-synt+real--292971'
@@ -42,7 +42,7 @@ class Object2DDetector:
         self.prediction_score_threshold = 0.8
         self.detections = None
         self.it =0
-
+        print('Object2DDetector built')
 
     def forward_pass_full_detector(self):
         self.detections = self.detector(self.image_full,**self.detector_kwargs)

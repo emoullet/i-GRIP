@@ -7,7 +7,7 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 
 from i_grip import databases_utils as db
-from i_grip import Scene2 as sc
+from i_grip import Scene_refactored_multi as sc
 import ExperimentRecorder as erc
 import ExperimentPreProcessor as epp
 import ExperimentReplayer_refactored as erp

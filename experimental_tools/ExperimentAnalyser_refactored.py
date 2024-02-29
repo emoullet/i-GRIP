@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 
 import argparse
-from i_grip import Scene_refactored as sc
+from i_grip import Scene_refactored_multi as sc
 import cv2
-import numpy as np
-import os
 import pandas as pd
 import time
 

@@ -256,6 +256,36 @@ class Scene :
             del self.objects[key]
             print('object '+key+' forgotten')
      
+    # def update_meshes(self, scene):
+    #     ttot = time.time()
+    #     if self.run_scene_display:
+    #         # print('update meshes')
+    #         t = time.time()
+    #         if self.show_prediction:
+    #             self.predict_future_trajectory(scene)
+    #         print(f'predict_future_trajectory time : {(time.time()-t)*1000} ms')
+    #         t = time.time()
+    #         self.update_hands_meshes(scene)
+    #         print(f'update_hands_meshes time : {(time.time()-t)*1000} ms')
+    #         t = time.time()
+    #         self.update_object_meshes(scene)
+    #         print(f'update_object_meshes time : {(time.time()-t)*1000} ms')
+    #         t= time.time()
+    #         self.update_target_detectors_meshes(scene)
+    #         print(f'update_target_detectors_meshes time : {(time.time()-t)*1000} ms')
+    #         t = time.time()
+    #         if self.show_trajectory:
+    #             self.update_trajectory_meshes(scene)
+    #         print(f'update_trajectory_meshes time : {(time.time()-t)*1000} ms')
+    #         t = time.time()
+    #         if self.detect_grasping:
+    #             self.check_all_targets(scene)
+    #             print(f'check_all_targets time : {(time.time()-t)*1000} ms')
+    #             t = time.time()
+    #             self.fetch_all_targets()
+    #             print(f'fetch_all_targets time : {(time.time()-t)*1000} ms')
+    #     print(f'update_meshes time : {(time.time()-ttot)*1000} ms')
+
     def update_meshes(self, scene):
         ttot = time.time()
         if self.run_scene_display:
@@ -263,29 +293,15 @@ class Scene :
             t = time.time()
             if self.show_prediction:
                 self.predict_future_trajectory(scene)
-            print(f'predict_future_trajectory time : {(time.time()-t)*1000} ms')
-            t = time.time()
             self.update_hands_meshes(scene)
-            print(f'update_hands_meshes time : {(time.time()-t)*1000} ms')
-            t = time.time()
             self.update_object_meshes(scene)
-            print(f'update_object_meshes time : {(time.time()-t)*1000} ms')
-            t= time.time()
             self.update_target_detectors_meshes(scene)
-            print(f'update_target_detectors_meshes time : {(time.time()-t)*1000} ms')
-            t = time.time()
             if self.show_trajectory:
                 self.update_trajectory_meshes(scene)
-            print(f'update_trajectory_meshes time : {(time.time()-t)*1000} ms')
-            t = time.time()
             if self.detect_grasping:
                 self.check_all_targets(scene)
-                print(f'check_all_targets time : {(time.time()-t)*1000} ms')
-                t = time.time()
                 self.fetch_all_targets()
-                print(f'fetch_all_targets time : {(time.time()-t)*1000} ms')
-        print(f'update_meshes time : {(time.time()-ttot)*1000} ms')
-
+                
     def update_hands_meshes(self, scene):
         hands_to_delete = self.hands_to_delete.copy().keys()
         self.hands_to_delete = {}

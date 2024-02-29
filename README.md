@@ -64,6 +64,13 @@ cd cosypose
 git lfs pull`
 2. `python setup.py develop`
 
+Note :
+in `cosypose/lib3d/transform.py` you might need to comment the 4th line :
+
+```
+# eigenpy.switchToNumpyArray()
+```
+
 In your i-GRIP folder, run
 
 ```
@@ -72,13 +79,17 @@ pip install -e .
 
 # Downloading and preparing data
 
+Required data paths are declared in `config.py` and may be adapted to your own architecture
+
 ## Cosypose
 
 Follow <a href="https://github.com/Simple-Robotics/cosypose?tab=readme-ov-file#downloading-and-preparing-data">these instructions </a> to download neural networks and 3d models.
+Depending on the performances of your setup, the ray tracing used in the algorithm may be slow with the original, high definition ycbv and t-less 3d meshes. If that is the case, you may run the script `simplify_meshes.py`, and adjust the constants `_*dataset*_TARGET_COUNT` to your preferences.
 
 ## Mediapipe
 
 see : https://developers.google.com/mediapipe/solutions/vision/hand_landmarker
+
 or dl directly :
 https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
 

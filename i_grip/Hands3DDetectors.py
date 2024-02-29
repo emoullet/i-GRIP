@@ -40,7 +40,8 @@ class Hands3DDetector:
         elif running_mode == self.VIDEO_FILE_MODE:
             self.get_hands = self.get_hands_video
             self.landmarker_options = mp.tasks.vision.HandLandmarkerOptions(
-                base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path),
+                base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path,
+                delegate = mp.tasks.BaseOptions.Delegate.GPU),
                 running_mode=mp.tasks.vision.RunningMode.VIDEO,
                 num_hands=self.num_hands,
                 min_hand_presence_confidence=0.4,
@@ -55,7 +56,11 @@ class Hands3DDetector:
     def init_landmarker(self):
         self.hands_predictions = []
         self.landmarker = mp.tasks.vision.HandLandmarker.create_from_options(self.landmarker_options)
-
+        
+    def reset(self):
+        self.init_landmarker()
+        self.new_frame = False
+        
     def extract_hands(self, detection_result: mp.tasks.vision.HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
         if detection_result is not None:
             hands_preds = []
@@ -74,15 +79,16 @@ class Hands3DDetector:
                     hands_preds.append(hand)
             self.hands_predictions = hands_preds
 
-    def get_hands_video(self, frame, depth_frame):
+    def get_hands_video(self, frame, depth_frame, timestamp):
         if frame is not None and depth_frame is not None:
         # if frame is not None and depthFrame is not None:
             # mp_frame = cv2.cvtColor(cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
             # mp_frame = cv2.cvtColor(cv2.flip(self.frame,1), cv2.COLOR_BGR2RGB) 
-            mp_frame = cv2.flip(frame,1)
+            # mp_frame = cv2.flip(frame,1)
             # mp_frame=self.frame
-            frame_timestamp_ms = round(self.timestamp*1000)
-            mp_image = mp.Image(image_format=self.format, data=mp_frame)
+            frame_timestamp_ms = round(timestamp*1000)
+            mp_image = mp.Image(image_format=self.format, data=frame)
+            print(f'frame_timestamp_ms: {frame_timestamp_ms}')
             landmark_results = self.landmarker.detect_for_video(mp_image, frame_timestamp_ms)
             # landmark_results = self.landmarker.detect(mp_image)
             self.depth_map = depth_frame

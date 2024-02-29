@@ -206,14 +206,6 @@ class GraspingDetector:
         process_scene_analysis.start()
         rgbd_cam.start()
         
-        obj_path = './YCBV_test_pictures/javel.png'
-        obj_path2 = './YCBV_test_pictures/mustard_front.png'
-        # obj_path = './YCBV_test_pictures/YCBV.png'
-        obj_img = cv2.imread(obj_path)
-        obj_img = cv2.resize(obj_img, (int(obj_img.shape[1]/2), int(obj_img.shape[0]/2)))
-        obj_img2 = cv2.imread(obj_path2)
-        obj_img2 = cv2.resize(obj_img2, (int(obj_img2.shape[1]/2), int(obj_img2.shape[0]/2)))
-        
         obj_imgs = []
         for img in self.obj_images:
             obj_img = cv2.imread(img)
