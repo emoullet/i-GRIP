@@ -20,14 +20,8 @@ i-GRIP: a vision-based interface for grasping intention detection and grip selec
 - [Overview](#overview)
 - [Installation](#installation)
 - [Downloading and preparing data](#downloading-and-preparing-data)
-- [Note on GPU parallelization](#note-on-gpu-parallelization)
-- [Reproducing single-view results](#reproducing-single-view-results)
-- [Training the single-view 6D pose estimation models](#training-the-single-view-6D-pose-estimation-models)
-  - [Synthetic data generation](#synthetic-data-generation)
-  - [Training script](#training-script)
-- [Reproducing multi-view results](#reproducing-multi-view-results)
-- [Using CosyPose in a custom scenario](#using-cosypose-in-a-custom-scenario)
-- [BOP20 models and results](#bop20-models-and-results)
+- [Hardware](#hardware)
+- [Using i-GRIP](#using-i-grip)
 
 # Overview
 
