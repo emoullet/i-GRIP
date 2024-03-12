@@ -134,17 +134,27 @@ class RigidObject(Entity):
                 self.mesh = tm.load_mesh(self.mesh_path+'/'+self.label+'.ply')
                 print('MESH LOADED : ' + self.mesh_path+'/'+self.label+'.ply')
             self.mesh.visual.face_colors = self.mesh_color
-            print(len(self.mesh.vertices))
+            print(f'vertices : {self.mesh.vertices}')
+            print(f'faces : {self.mesh.faces}')
+            print(f'normals : {self.mesh.vertex_normals}')
+            print(f'center of mass : {self.mesh.center_mass}')
+            
         except:
             self.mesh = None
             print(self.mesh_path)
             print('MESH LOADING FAILED')
+        self.bounding_primitive =  self.mesh.bounding_cylinder.primitive
+        self.bounds = self.mesh.bounds
+        #find main axis (where the cylinder is the longest)
+        self.main_axis = np.argmax(self.bounds[:,1]-self.bounds[:,0])
     
     def load_urdf(self):
         self.mesh = tm.load_mesh(self.urdf_path+self.label+'/'+self.label+'.obj')
         print('URDF LOADED : ' + self.urdf_path+self.label+'/'+self.label+'.obj')
         exit()
 
+    def get_bounding_primitive(self):
+        return self.bounding_primitive
     
     def update(self, new_prediction, timestamp = None):
         # t = time.time()
@@ -184,8 +194,17 @@ class RigidObject(Entity):
         # x_reflection_matrix = tm.transformations.reflection_matrix(np.array([0,0,0]), np.array([1,0,0]))
         #mesh_transform = tm.transformations.translation_matrix(mesh_pos)  @ tm.transformations.quaternion_matrix(mesh_orient_quat)
         rot_mat = tm.transformations.euler_matrix(mesh_orient_angles[0],mesh_orient_angles[1],mesh_orient_angles[2])
+        t = time.time()
         self.mesh_transform = tm.transformations.translation_matrix(self.mesh_pos) @ rot_mat
+        print(self.mesh_transform)
+        print(f'mesh transform time @ : {(time.time()-t)*1000:.2f}ms')
+        t= time.time()
+        self.mesh_transform = np.dot(tm.transformations.translation_matrix(self.mesh_pos),rot_mat)
+        print(self.mesh_transform)
+        print(f'mesh transform time np.dot : {(time.time()-t)*1000:.2f}ms')
+        t = time.time()
         self.inv_mesh_transform = np.linalg.inv(self.mesh_transform)
+        print(f'inv mesh transform time : {(time.time()-t)*1000:.2f}ms')
         self.set_mesh_updated(True)
     
     def write(self, img):

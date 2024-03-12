@@ -319,7 +319,7 @@ class TargetDetector(Timed):
         for impacts in results:
             if impacts is not None:
                 all_impacts += impacts
-        # print(f'check all targets {(time.time()-t)*1000} ms')
+        # print(f'check all targets {(time.time()-t)*1000:.2f} ms')
         self.check_all_targets_time_window.queue(((time.time()-t)*1000, self.get_elapsed()))
         if len(all_impacts)>0:
             return np.vstack(all_impacts)
@@ -353,7 +353,7 @@ class TargetDetector(Timed):
                 target.analyse()
             # print(f'send plots for target {label}')
             # self.send_plots(label)
-        print(f'analyse all targets {(time.time()-t)*1000} ms')
+        print(f'analyse all targets {(time.time()-t)*1000:.2f} ms')
         t= time.time()
         self.hand_x_window.queue((self.hand.mesh_position.x, elapsed))
         self.hand_y_window.queue((self.hand.mesh_position.y, elapsed))
@@ -409,7 +409,7 @@ class TargetDetector(Timed):
         # if target_from_distance.get_distance_to_hand()<self.distance_threshold:
         #     most_probable_target = target_from_distance
         self.most_probable_target_window.queue((most_probable_target_index, elapsed))
-        print(f'get most probable target {(time.time()-t)*1000} ms')
+        print(f'get most probable target {(time.time()-t)*1000:.2f} ms')
         
         return most_probable_target, self.potential_targets
 
@@ -518,7 +518,7 @@ class TargetDetector(Timed):
                 if self.plotter is not None:
                     tgp = time.time()
                     to_plots += target.get_plots()
-                    # print(f'get plots for target {target.label} {(time.time()-tgp)*1000} ms')
+                    # print(f'get plots for target {target.label} {(time.time()-tgp)*1000:.2f} ms')
             #         tpp = time.time()
             #         for to_plot in to_plots:
             #             # to_plot['label'] = label
@@ -528,8 +528,8 @@ class TargetDetector(Timed):
             #         if (time.time()-tpp)*1000>10:
             #             print(to_plots)
             #             # jk
-            #         print(f'send plots for target {target.label} {(time.time()-tpp)*1000} ms')
-            # print(f'plot all targets {(time.time()-t)*1000} ms')
+            #         print(f'send plots for target {target.label} {(time.time()-tpp)*1000:.2f} ms')
+            # print(f'plot all targets {(time.time()-t)*1000:.2f} ms')
             
             t = time.time()
             to_plot_target_from_distance = dict(color = TargetDetector._METRICS_COLORS[0],
@@ -627,7 +627,7 @@ class TargetDetector(Timed):
                             plot_type = '',
                             plot_target = 'Computation Times',
                             metric_label = 'Check all targets')
-            print(f'mean_check_all_targets_time {np.mean(self.check_all_targets_time_window.data)}')
+            print(f'mean_check_all_targets_time {np.mean(self.check_all_targets_time_window.data)} ms')
             to_plots += [to_plot_target_from_distance, to_plot_target_from_distance_derivative, to_plot_target_from_impacts, to_plot_confidence_from_distance, to_plot_confidence_from_distance_derivative, to_plot_confidence_from_impacts, to_plot_hand_scalar_velocity, to_plot_most_probable_target, to_plot_check_all_targets_time]
             
             self.plotter.plot(to_plots)
@@ -692,25 +692,7 @@ class Target(Timed):
             self.find_grip = self.find_grip_bleach
         elif self.obj_label == 'cheez\'it':
             self.find_grip = self.find_grip_cheezit
-    
-    def update_distance(self):
-        inv_trans = self.object.inv_mesh_transform
-        hand_pos_obj_frame = (inv_trans@self.hand.mesh_position.ve)[:3]
-        self.relative_hand_pos = Position(hand_pos_obj_frame)
         
-        # update distance to target
-        t = time.time()
-        # (_, distances, _) = self.object.mesh.nearest.on_surface(hand_pos_obj_frame.reshape(1,3))
-        # new_distance = distances[0]
-        new_distance = -self.signed_distance_finder(hand_pos_obj_frame.reshape(1,3))[0]
-        # print('new_distance', new_distance)
-        self.distance_to_hand = new_distance
-        # new_distance = 100
-        print(f'compute time for distance {(time.time()-t)*1000} ms')
-        # print('new_distance', new_distance)
-        # print('label', self.obj_label, 'new_distance', new_distance, 'elapsed', elapsed)
-        self.distance_window.queue((new_distance, self.get_elapsed()))
-    
     def was_updated(self):
         return self.updated
     
@@ -718,6 +700,45 @@ class Target(Timed):
         my_bool = self.hand.timestamp > self.timestamp or self.object.timestamp > self.timestamp
         print(f'{self.hand_label} - {self.obj_label} target needs update: {my_bool}')
         return my_bool
+    
+    def update_distance(self):
+        ti = time.time()
+        inv_trans = self.object.inv_mesh_transform
+        t= time.time()
+        hand_pos_obj_frame = (inv_trans@self.hand.mesh_position.ve)[:3]
+        print(f'compute time for relative hand pos {(time.time()-t)*1000:.2f} ms')
+        t= time.time()
+        hand_pos_obj_frame = np.dot(inv_trans, self.hand.mesh_position.ve)[:3]
+        print(f'compute time for relative hand pos bis {(time.time()-t)*1000:.2f} ms')
+        t= time.time()
+        self.relative_hand_pos = Position(hand_pos_obj_frame)
+        print(f'compute time for relative hand pos ter {(time.time()-t)*1000:.2f} ms')
+        
+        # update distance to target
+        t = time.time()
+        # (_, distances, _) = self.object.mesh.nearest.on_surface(hand_pos_obj_frame.reshape(1,3))
+        # new_distance = distances[0]
+        new_distance = -self.signed_distance_finder(hand_pos_obj_frame.reshape(1,3))[0]
+        print(f'distance :{new_distance} ')
+        print(f'distance time {(time.time()-t)*1000:.2f} ms')
+        t = time.time()
+        self.closest_vertex_index = self.signed_distance_finder.nn(hand_pos_obj_frame.reshape(1,3))[0]
+        distance_bis = np.linalg.norm(self.signed_distance_finder.vertices[self.closest_vertex_index]-hand_pos_obj_frame)
+        print(f'distance bis :{distance_bis} ')
+        print(f'closest time {(time.time()-t)*1000:.2f} ms')
+        print(f'closest {self.closest_vertex_index}')
+        self.closest_vertex_coords = self.signed_distance_finder.vertices[self.closest_vertex_index]
+        print(f'coords {self.closest_vertex_coords}')
+        # print('new_distance', new_distance)
+        self.distance_to_hand = new_distance
+        # new_distance = 100
+        # print('new_distance', new_distance)
+        # print('label', self.obj_label, 'new_distance', new_distance, 'elapsed', elapsed)
+        t = time.time()
+        self.distance_window.queue((new_distance, self.get_elapsed()))
+        print(f'compute time for distance window {(time.time()-t)*1000:.2f} ms')
+        print(f'compute time for distance {(time.time()-ti)*1000:.2f} ms')
+    
     
     def update(self, ray_origins, ray_directions, timestamp):
         self.set_timestamp(max(self.hand.timestamp, self.object.timestamp))
@@ -730,6 +751,11 @@ class Target(Timed):
         self.updated = True
         self.analysed = False
         return impacts
+    
+    def estimate_impact_zone(self):        
+        predicted_impact_zone_impacts = Position(self.projected_collison_window.mean())
+        self.predicted_impact_zone = self.closest_vertex_coords
+        
     
     def check_impacts(self, ray_origins, ray_directions):
         t = time.time()
@@ -744,53 +770,19 @@ class Target(Timed):
         ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in ray_directions])    
         try:
             impacts, _, _ = self.object.mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
-                                                                        ray_directions=ray_directions_obj_frame,
-                                                                        multiple_hits=False)
+            ray_directions=ray_directions_obj_frame,
+            multiple_hits=False)
         except:
             impacts = []
         self.projected_collison_window.queue(impacts)
-        self.predicted_impact_zone = Position(self.projected_collison_window.mean())
         self.nb_impacts_window.queue((self.projected_collison_window.nb_impacts, self.get_elapsed()))
         # print(f'window {self.nb_impacts_window}')
         if len(impacts)>0:
             impacts_scene_frame = [(self.object.get_mesh_transform()@np.append(impact, 1))[:3] for impact in impacts]
         else:
             impacts_scene_frame = []
-        print(f'compute time hand {self.hand_label} target {self.obj_label} for impacts {(time.time()-t)*1000} ms')
+        print(f'compute time hand {self.hand_label} target {self.obj_label} for impacts {(time.time()-t)*1000:.2f} ms')
         # self.check_impacts_compute_time_window.queue((time.time()-t, self.get_elapsed()))
-        return impacts_scene_frame
-    
-    def check_impacts_old(self, ray_origins, ray_directions):
-        t = time.time()
-        if not (self.hand.was_mesh_updated() or self.object.was_mesh_updated()):
-            print(f'no need to check target for {self.object.label}')
-            new = False
-            impacts = []
-        else:
-            # print(f'check impacts for {self.object.label}')
-            inv_trans = self.object.inv_mesh_transform
-            # update impact locations
-            ray_origins_obj_frame = []
-            impacts = []
-            ray_origins_obj_frame = np.vstack([(inv_trans@np.append(ray_origin, 1))[:3] for ray_origin in ray_origins])
-            
-            rot = inv_trans[:3,:3]
-            ray_directions_obj_frame = np.vstack([rot @ ray_dir for ray_dir in ray_directions])    
-            try:
-                impacts, _, _ = self.object.mesh.ray.intersects_location(ray_origins=ray_origins_obj_frame,
-                                                                            ray_directions=ray_directions_obj_frame,
-                                                                            multiple_hits=False)
-            except:
-                impacts = []
-        self.projected_collison_window.queue(impacts)
-        self.predicted_impact_zone = Position(self.projected_collison_window.mean())
-        self.nb_impacts_window.queue((self.projected_collison_window.nb_impacts, self.get_elapsed()))
-        # print(f'window {self.nb_impacts_window}')
-        if len(impacts)>0:
-            impacts_scene_frame = [(self.object.get_mesh_transform()@np.append(impact, 1))[:3] for impact in impacts]
-        else:
-            impacts_scene_frame = []
-        print(f'compute time hand {self.hand_label} target {self.obj_label} for impacts {(time.time()-t)*1000} ms')
         return impacts_scene_frame
 
     def set_impact_ratio(self, ratio):
@@ -835,7 +827,7 @@ class Target(Timed):
         if self.predicted_impact_zone is not None:
             self.find_grip()
         self.anaysis_compute_time_window.queue(((time.time()-t)*1000, self.get_elapsed()))
-        # print(f'analysis comput time for {self.hand_label} - {self.obj_label} : {(time.time()- t )*1000} ms')
+        # print(f'analysis comput time for {self.hand_label} - {self.obj_label} : {(time.time()- t )*1000:.2f} ms')
         self.analysed = True
     
     def get_distance_to_hand(self):
@@ -862,6 +854,54 @@ class Target(Timed):
             self.grip = 'PINCH'
         else:
             self.grip = 'PALMAR'
+    
+    def find_grip_adaptative(self):        
+        point_of_view = np.array([0, 100, 0])
+        print(point_of_view.shape)
+        #get closest point on the mesh to the point of view
+        closest_point = mesh.nearest.on_surface([point_of_view])[0].reshape(-1)
+        print(closest_point)
+        print(point_of_view)
+        # get normalised vector from the closest point to the point of view
+        normal = closest_point - point_of_view
+        print(normal)
+        normal = normal / np.linalg.norm(normal)
+        #reshape the normal to be a (3,) vector
+        normal = normal.reshape(-1)
+        print(normal.shape)
+        # get vertices of the mesh in a sphere around the closest point, radius 50, using numpy
+        vertices = mesh.vertices
+        print(vertices.shape)
+
+        # get the vertices that are in the sphere
+        sphere_radius = 50
+        vertices_sphere = vertices - closest_point
+        vertices_sphere = np.linalg.norm(vertices_sphere, axis=1)
+        vertices_sphere = vertices_sphere < sphere_radius
+        vertices_sphere = vertices_sphere.reshape(-1)
+        vertices_sphere = mesh.vertices[vertices_sphere]
+
+        print(vertices.shape)
+        print(vertices_sphere.shape)
+        t = time.time()
+        print(f'nearest elapsed time: {(time.time() - t)*1000} ms')
+
+
+        point_of_view = point_of_view.reshape(-1, 1)
+        t= time.time()
+        to_2D = trimesh.geometry.plane_transform(origin=point_of_view.T, normal=normal)
+        # transform mesh vertices to 2D and clip the zero Z
+        vertices_sphere_2D = trimesh.transform_points(vertices_sphere, to_2D)[:, :2]
+        vertices_2D = trimesh.transform_points(vertices, to_2D)[:, :2]
+        print(f'prjoection elapsed time: {(time.time() - t)*1000} ms')
+        t = time.time()
+
+
+        t= time.time()
+        vertices_sphere_2D = np.array(vertices_sphere_2D, dtype=np.float32).reshape(-1, 1, 2)
+        hull = cv2.convexHull(vertices_sphere_2D)
+        rec = cv2.minAreaRect(vertices_sphere_2D)
+        box = cv2.boxPoints(rec)
 
     def find_grip_mustard(self):
         if self.predicted_impact_zone.v[0]>0:

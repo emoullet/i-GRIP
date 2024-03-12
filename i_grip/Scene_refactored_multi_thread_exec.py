@@ -16,6 +16,7 @@ from i_grip.Hands_refactored import GraspingHand
 from i_grip.Objects import RigidObject
 from i_grip.Targets_refactored_multi_and_thread import TargetDetector
 # from i_grip.Targets_refactored_multi import TargetDetector
+from i_grip.clean_scene import CleanScene
 
 class MeshScene(tm.Scene):
     def __init__(self, *args, **kwargs):
@@ -71,6 +72,7 @@ class Scene :
         self.draw_mesh = draw_mesh
         self.dataset= dataset
         self.plotter = plotter
+        
         self.executor = concurrent.futures.ThreadPoolExecutor()
         
         self.timestep_index = 0
@@ -121,7 +123,8 @@ class Scene :
     
 
     def define_mesh_scene(self):
-        self.mesh_scene= tm.Scene()
+        self.mesh_scene= CleanScene()
+        # self.mesh_scene= tm.Scene()
         self.mesh_scene.camera.resolution = self.cam_data['resolution']
         self.mesh_scene.camera.focal= (self.cam_data['matrix'][0,0], self.cam_data['matrix'][1,1])
         self.mesh_scene.camera.z_far = 3000
@@ -179,6 +182,9 @@ class Scene :
         new_hand = GraspingHand(label=label, input = input, timestamp = timestamp, plotter=self.plotter)
         self.hands[label] = new_hand
         self.new_hand_meshes.append({'mesh' : self.hands[label].mesh_origin, 'name': label})
+        if new_hand.full_hand:
+            for i, key_point in enumerate(new_hand.mesh_key_points):
+                self.new_hand_meshes.append({'mesh' : key_point, 'name': label+'_keypoint_'+str(i)})
         
         self.target_detectors[label] = TargetDetector(new_hand, plotter= self.plotter)
         
@@ -262,29 +268,43 @@ class Scene :
             t = time.time()
             if self.show_prediction:
                 self.predict_future_trajectory(scene)
-            print(f'predict_future_trajectory time : {(time.time()-t)*1000} ms')
+            print(f'predict_future_trajectory time : {(time.time()-t)*1000:.2f} ms')
             t = time.time()
             self.update_hands_meshes(scene)
-            print(f'update_hands_meshes time : {(time.time()-t)*1000} ms')
+            print(f'update_hands_meshes time : {(time.time()-t)*1000:.2f} ms')
             t = time.time()
             self.update_object_meshes(scene)
-            print(f'update_object_meshes time : {(time.time()-t)*1000} ms')
+            print(f'update_object_meshes time : {(time.time()-t)*1000:.2f} ms')
             t= time.time()
             self.update_target_detectors_meshes(scene)
-            print(f'update_target_detectors_meshes time : {(time.time()-t)*1000} ms')
+            print(f'update_target_detectors_meshes time : {(time.time()-t)*1000:.2f} ms')
             t = time.time()
             if self.show_trajectory:
                 self.update_trajectory_meshes(scene)
-            print(f'update_trajectory_meshes time : {(time.time()-t)*1000} ms')
+            print(f'update_trajectory_meshes time : {(time.time()-t)*1000:.2f} ms')
             t = time.time()
             if self.detect_grasping:
                 self.check_all_targets(scene)
-                print(f'check_all_targets time : {(time.time()-t)*1000} ms')
+                print(f'check_all_targets time : {(time.time()-t)*1000:.2f} ms')
                 t = time.time()
                 self.fetch_all_targets()
-                print(f'fetch_all_targets time : {(time.time()-t)*1000} ms')
-        print(f'update_meshes time : {(time.time()-ttot)*1000} ms')
+                print(f'fetch_all_targets time : {(time.time()-t)*1000:.2f} ms')
+        print(f'update_meshes time : {(time.time()-ttot)*1000:.2f} ms')
 
+    # def update_meshes(self, scene):
+    #     if self.run_scene_display:
+    #         # print('update meshes')
+    #         if self.show_prediction:
+    #             self.predict_future_trajectory(scene)
+    #         self.update_hands_meshes(scene)
+    #         self.update_object_meshes(scene)
+    #         self.update_target_detectors_meshes(scene)
+    #         if self.show_trajectory:
+    #             self.update_trajectory_meshes(scene)
+    #         if self.detect_grasping:
+    #             self.check_all_targets(scene)
+    #             self.fetch_all_targets()
+                
     def update_hands_meshes(self, scene):
         hands_to_delete = self.hands_to_delete.copy().keys()
         self.hands_to_delete = {}
@@ -301,6 +321,12 @@ class Scene :
         for label, hand in hands:      
             hand.update_mesh()       
             scene.graph.update(label,matrix = hand.get_mesh_transform(), geometry = label)
+            if hand.full_hand:
+                tfs, paths = hand.get_keypoints_representation()
+                for i  in range(len(hand.mesh_key_points)):
+                    scene.graph.update(label+'_keypoint_'+str(i), matrix = tfs[i], geometry = label+'_keypoint_'+str(i))
+                scene.delete_geometry(label+'_keypoint_connection_paths')
+                scene.add_geometry(paths, geom_name=label+'_keypoint_connection_paths')
 
     def update_object_meshes(self, scene):     
         objects_to_delete = self.objects_to_delete.copy().keys()
@@ -331,7 +357,9 @@ class Scene :
 
     
     def update_trajectory_meshes(self, scene):
+        t = time.time()
         hands = self.hands.copy()
+        print(f'copy hands time : {(time.time()-t)*1000:.2f} ms')
         for hlabel, hand in hands.items():
             if self.show_trajectory:
                 scene.delete_geometry(hand.label+'trajectory')
@@ -347,11 +375,18 @@ class Scene :
     def predict_future_trajectory(self, scene):
         hands= self.hands.copy()
         for hlabel, hand in hands.items():
+            t= time.time()
             scene.delete_geometry(hand.label+'future_trajectory')
+            print(f'delete_geometry time for hand {hand.label} : {(time.time()-t)*1000:.2f} ms')
+            t = time.time()
             predicted_trajectory = hand.get_future_trajectory_points()
-            if len(predicted_trajectory):
+            print(f'get_future_trajectory time for hand {hand.label} : {(time.time()-t)*1000:.2f} ms')
+            t = time.time()
+            if len(predicted_trajectory)>0:
                 predicted_trajectory = tm.points.PointCloud(predicted_trajectory, colors=hand.future_color)
                 scene.add_geometry(predicted_trajectory, geom_name=hand.label+'future_trajectory')
+            print(f'scene geometries: {len(scene.geometry)}')
+            print(f'add_geometry time for hand {hand.label} : {(time.time()-t)*1000:.2f} ms')
 
 
     def check_all_targets(self, scene, timestamp = None):
@@ -374,7 +409,7 @@ class Scene :
             timestamp = time.time()
         impacts = self.target_detectors[label].check_all_targets()    
         return (label, impacts)
-        
+
     def fetch_all_targets(self, timestamp = None):
         t = time.time()
         targets = {}
@@ -392,7 +427,7 @@ class Scene :
                     if olabel == targets[dlabel].label:
                         target_info=(True, self.hands[dlabel], targets[dlabel][olabel])
                     self.objects[olabel].set_target_info(target_info)
-        # print(f'fetch_all_targets time : {(time.time()-t)*1000} ms')
+        # print(f'fetch_all_targets time : {(time.time()-t)*1000:.2f} ms')
 
     def evaluate_grasping_intention(self):
         hands = self.hands.copy().values
@@ -506,12 +541,18 @@ class LiveScene(Scene):
     def render(self, img):
         # self.compute_distances()
         self.update_scene_time()
+        t = time.time()
         hands = self.hands.copy().values()
         objs = self.objects.copy().values()
+        print(f'get hands and objects time : {(time.time()-t)*1000:.2f} ms')
+        t = time.time()
         for hand in hands:
             hand.render(img)
+        print(f'hand render time : {(time.time()-t)*1000:.2f} ms')
+        t = time.time()
         for obj in objs:
             obj.render(img)
+        print(f'obj render time : {(time.time()-t)*1000:.2f} ms')
         if self.rendering_options['write_fps']:
             self.write_fps(img)
 

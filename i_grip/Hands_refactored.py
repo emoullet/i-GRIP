@@ -73,19 +73,23 @@ class GraspingHandTrajectory(Trajectory):
             
             # self.polynomial_function = np.polynomial.polynomial.polyval(t, self.poly_coeffs)
     
-    def skl_fit(self, nb_points):
-        # find polynomial fit for the last nb_points of the trajectory
-        if len(self.data) < nb_points:
-            print('Not enough data points to find a polynomial fit')
-        else:
-            last_points = self.data.iloc[-nb_points:]
-            t = last_points['Timestamps'].values.reshape(-1,1)
-            xyz = last_points[['x','y','z']].values 
-            print(f'xyz : {xyz}')
-            print(f't : {t}')
-            self.model.fit(t, xyz)
-            self.was_fitted = True
     
+    # def np_poly_extrapolate(self, timestamps):
+    #     # extrapolate the trajectory using a polynomial fit
+    #     if not self.was_fitted:
+    #         # print('No polynomial fit found, please use polynomial_fit() first')
+    #         x = self.data.loc[len(self.data)-1]['x']
+    #         y = self.data.loc[len(self.data)-1]['y']
+    #         z = self.data.loc[len(self.data)-1]['z']
+    #         # x = np.polynomial.chebyshev.chebval(timestamps, self.poly_coeffs['x'])
+    #         # y = np.polynomial.chebyshev.chebval(timestamps, self.poly_coeffs['y'])
+    #         # z = np.polynomial.chebyshev.chebval(timestamps, self.poly_coeffs['z'])
+    #         return np.array([x,y,z])
+    #     else:
+    #         x = self.poly_coeffs['x'](timestamps)
+    #         y = self.poly_coeffs['y'](timestamps)
+    #         z = self.poly_coeffs['z'](timestamps)
+    #     return np.array([x,y,z])
     def np_poly_extrapolate(self, timestamps):
         # extrapolate the trajectory using a polynomial fit
         if not self.was_fitted:
@@ -98,20 +102,14 @@ class GraspingHandTrajectory(Trajectory):
             # z = np.polynomial.chebyshev.chebval(timestamps, self.poly_coeffs['z'])
             return np.array([x,y,z])
         else:
-            x = self.poly_coeffs['x'](timestamps)
-            y = self.poly_coeffs['y'](timestamps)
-            z = self.poly_coeffs['z'](timestamps)
-        return np.array([x,y,z])
+            print(f'timestamps : {timestamps}')
+            x = self.poly_coeffs['x'](np.array(timestamps))
+            y = self.poly_coeffs['y'](np.array(timestamps))
+            z = self.poly_coeffs['z'](np.array(timestamps))
+            res = np.array([x,y,z]).T
+            print(f'extrapolated res : {res}')  
+        return res
 
-    def skl_extrapolate(self, timestamps): 
-        if not self.was_fitted:
-            # print('No model found, please use skl_fit() first')
-            x = self.data.loc[len(self.data)-1]['x']
-            y = self.data.loc[len(self.data)-1]['y']
-            z = self.data.loc[len(self.data)-1]['z']
-            return np.array([x,y,z])
-        else:
-            return self.model.predict(np.array([[timestamps]]))[0]
     
     def compute_last_derivatives(self, nb_points=None):
         # compute derivatives of the last nb_points of the trajectory
@@ -303,7 +301,9 @@ class GraspingHand(Entity):
         
     def propagate(self, timestamp=None):
         # print(f'timestamp : {timestamp}')
+        t = time.time()
         self.state.propagate_all(timestamp)
+        print(f'propagate all hand time : {(time.time()-t)*1000:2f} ms')
         # self.state.propagate(timestamp)
         self.set_mesh_updated(False)
         # self.update_trajectory()
@@ -367,6 +367,7 @@ class GraspingHand(Entity):
     def render(self, img):
         # Draw the hand landmarks.
         # displayed_landmarks = self.state.landmarks
+        t = time.time()
         displayed_landmarks = self.detected_hand.get_landmarks()
         landmarks_proto = landmark_pb2.NormalizedLandmarkList()
         # landmarks_proto.landmark.extend([
@@ -379,7 +380,7 @@ class GraspingHand(Entity):
                                             solutions.hands.HAND_CONNECTIONS,
                                             solutions.drawing_styles.get_default_hand_landmarks_style(),
                                             solutions.drawing_styles.get_default_hand_connections_style())
-
+        print(f'draw_landmarks tie : {(time.time()-t)*1000:2f} ms')
         if self.show_label:
             # Get the top left corner of the detected hand's bounding box.
             text_x = int(min(displayed_landmarks[:,0]))
@@ -545,6 +546,7 @@ class GraspingHandState(State):
             self.position_raw = next_position
     
     def propagate_all(self, timestamp):
+        
         elapsed = timestamp - self.last_timestamp
         self.last_timestamp = timestamp
         self.propagate_only_position()
@@ -576,13 +578,6 @@ class GraspingHandState(State):
     def extrapolation_allowed(self):
         return self.extraplation_count < 5
             
-    def compute_future_points_old(self, timespand=1):
-        timestamps = np.arange(self.last_timestamp, self.last_timestamp+timespand, 0.1)
-        self.future_points=[]
-        for timestamp in timestamps:
-            future_point = self.trajectory.extrapolate(timestamp)
-            # print(f'future_point : {future_point}')
-            self.future_points.append(future_point*np.array([-1,1,1]))
             
     def compute_future_points(self, nb_steps=10, timestep=0.1):
         vel_unit = 50
@@ -592,10 +587,12 @@ class GraspingHandState(State):
         self.future_points=[]
         if nb_steps == 0:
             self.future_points.append(self.position_filtered.v*np.array([-1,1,1]))
-        for timestamp in timestamps:
-            future_point = self.trajectory.extrapolate(timestamp)
-            # print(f'future_point : {future_point}')
-            self.future_points.append(future_point*np.array([-1,1,1]))
+        future_points = self.trajectory.extrapolate(timestamps)
+        self.future_points += [future_point*np.array([-1,1,1]) for future_point in future_points]
+        # for timestamp in timestamps:
+        #     future_point = self.trajectory.extrapolate(timestamp)
+        #     # print(f'future_point : {future_point}')
+        #     self.future_points.append(future_point*np.array([-1,1,1]))
             
     def get_future_trajectory_points(self):
         return self.future_points

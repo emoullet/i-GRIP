@@ -14,8 +14,10 @@ from i_grip import Hands3DDetectors as hd
 from i_grip import Object2DDetectors as o2d
 from i_grip import ObjectPoseEstimators as ope
 # from i_grip import Scene_refactored as sc
-from i_grip import Scene_refactored_multi as sc
+# from i_grip import Scene_refactored_multi as sc
 # from i_grip import Scene_refactored_multi_thread_exec as sc
+# from i_grip import Scene_refactored_multi_thread as sc
+from i_grip import Scene_refactored_multi_fullthread as sc
 # from i_grip import Scene_ nocopy as sc
 from i_grip import Plotters3 as pl
 # from i_grip import Plotters_queue as pl
@@ -149,7 +151,9 @@ def scene_analysis_task(cam_data, stop_event, detect_event, img_queue, hands_que
             img = img_queue.get()
             # print(f'got img')
             # print(img.shape)
+        print(f'get_queue time : {(time.time()-t)*1000:.2f} ms')
         if img is not None:
+            t = time.time()
             scene.render(img)
             print(f'scene render: {(time.time()-t)*1000:.2f} ms')
             cv2.imshow('render_img', img)
@@ -289,6 +293,7 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--dataset', choices=['t_less, ycbv'],
                         default = 'ycbv', help="Cosypose dataset to use for object detection and pose estimation")
     parser.add_argument('-f', '--fps', type=int, default=40, help="Frames per second for the camera")
+    # parser.add_argument('-i', '--images', nargs='+', help="Path to the image(s) to use for object detection", default=['./YCBV_test_pictures/javel.png'])
     parser.add_argument('-i', '--images', nargs='+', help="Path to the image(s) to use for object detection", default=['./YCBV_test_pictures/javel.png', './YCBV_test_pictures/mustard_front.png'])
     args = vars(parser.parse_args())
 

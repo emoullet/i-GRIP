@@ -69,11 +69,11 @@ class ExperimentReplayer:
             success, img, depth_map = self.rgbd_cam.next_frame()
             if not success:
                 continue
-            img = cv2.resize(img, (self.resolution[1], self.resolution[0]))
+            # img = cv2.resize(img, (self.resolution[1], self.resolution[0]))
             print(f'timestamp: {timestamp}')
             print(f'img shape: {img.shape}')
-            img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
-            depth_map = cv2.rotate(depth_map, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+            # depth_map = cv2.rotate(depth_map, cv2.ROTATE_90_COUNTERCLOCKWISE)
             render_img = img.copy()
             to_process_img = img.copy()
             fac = 2
