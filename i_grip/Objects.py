@@ -208,33 +208,61 @@ class RigidObject(Entity):
         self.set_mesh_updated(True)
     
     def write(self, img):
-        text = self.name 
-        x = self.render_box.corner1[0]
-        y = self.render_box.corner1[1]-60
+        # text = self.name 
+        # x = self.render_box.corner1[0]
+        # y = self.render_box.corner1[1]-60
+        # dy = 15
+        # cv2.rectangle(img, (x,y-20), (self.render_box.corner2[0],self.render_box.corner1[1]), (200,200,200), -1)
+        # cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)    
+        # if self.is_targeted:
+        #     text ='Trgt by : ' + self.targeter.label 
+        #     y+=dy
+        #     cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
+        #     text = 'tbi : '+str(self.target_info.get_time_of_impact()) + 'ms'
+        #     y+=dy
+        #     cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
+        #     text ='GRIP : '+self.target_info.get_grip()
+        #     y+=dy
+        #     cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color) 
+        RigidObject.write(img, self.name, self.render_box, self.color, self.is_targeted, self.targeter, self.target_info) 
+    
+    def write(img, label, render_box, color, is_targeted, targeter, target_info):
+        x = render_box.corner1[0]
+        y = render_box.corner1[1]-60
         dy = 15
-        cv2.rectangle(img, (x,y-20), (self.render_box.corner2[0],self.render_box.corner1[1]), (200,200,200), -1)
-        cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)    
-        if self.is_targeted:
-            text ='Trgt by : ' + self.targeter.label 
+        cv2.rectangle(img, (x,y-20), (render_box.corner2[0],render_box.corner1[1]), (200,200,200), -1)
+        cv2.putText(img, label , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color)    
+        if is_targeted:
+            text ='Trgt by : ' + targeter.label 
             y+=dy
-            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
-            text = 'tbi : '+str(self.target_info.get_time_of_impact()) + 'ms'
+            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color)  
+            text = 'tbi : '+str(target_info.get_time_of_impact()) + 'ms'
             y+=dy
-            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
-            text ='GRIP : '+self.target_info.get_grip()
+            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color)  
+            text ='GRIP : '+target_info.get_grip()
             y+=dy
-            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, self.color)  
+            cv2.putText(img, text , (x,y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color)
 
     def write_dist(self, img):
-        text = self.label
-        x = self.render_box.corner1[0]
-        y = self.render_box.corner2[1]
+        # text = self.name
+        # x = self.render_box.corner1[0]
+        # y = self.render_box.corner2[1]
+        # dy = 20
+        # cv2.rectangle(img, (x,y), (self.render_box.corner2[0]+30,y+50), (200,200,200), -1)
+        # for k, d in self.distances.items():
+        #     cv2.putText(img, 'd-'+k+' : '+str(int(d)) +' cm' , (x,y+20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, self.color)    
+        #     y+=dy
+        RigidObject.write_dist(img, self.distances, self.render_box, self.color)
+    
+    def write_dist(img,  dists, render_box, color):
+        x = render_box.corner1[0]
+        y = render_box.corner2[1]
         dy = 20
-        cv2.rectangle(img, (x,y), (self.render_box.corner2[0]+30,y+50), (200,200,200), -1)
-        for k, d in self.distances.items():
-            cv2.putText(img, 'd-'+k+' : '+str(int(d)) +' cm' , (x,y+20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, self.color)    
+        cv2.rectangle(img, (x,y), (render_box.corner2[0]+30,y+50), (200,200,200), -1)
+        for k, d in dists.items():
+            cv2.putText(img, 'd-'+k+' : '+str(int(d)) +' cm' , (x,y+20), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color)
             y+=dy
-
+            
     def render(self, img, bbox = True, txt=False, dist=False, overlay=False):
         if self.was_built_from != 'prediction':
             return
@@ -245,6 +273,31 @@ class RigidObject(Entity):
             self.render_box.draw(img)
         if dist:
             self.write_dist(img)
+        if overlay:
+            pass
+        
+    def render_object(img, label=None, render_box =None, color=None, is_targeted=False, targeter = None, target_info=None, distances = None, bbox = True, txt=False, dist=False, overlay=False):
+        if txt and label is not None and render_box is not None and color is not None:
+            RigidObject.write(img, label, render_box, color, is_targeted, targeter, target_info)
+        if bbox and render_box is not None:
+            render_box.draw(img)
+        if dist and distances is not None:
+            RigidObject.write_dist(img, distances, render_box, color)
+        if overlay:
+            pass
+        
+    def get_rendering_data(self, bbox = True, txt=False, dist=False, overlay=False):
+        data = {'label': self.name, 'color': self.color}
+        if bbox:
+            data['bbox'] = self.render_box
+        if txt:
+            data['text'] = self.name
+            data['color'] = self.color
+            data['targeted'] = self.is_targeted
+            data['targeter'] = self.targeter.label if self.targeter is not None else None
+            data['target_info'] = self.target_info
+        if dist:
+            data['distances'] = self.distances
         if overlay:
             pass
     

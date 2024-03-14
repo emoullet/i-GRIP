@@ -223,8 +223,8 @@ class TargetDetector(Timed):
         
         self.define_velocity_cone()
         
-        self.check_event = multiprocessing.Event()
-        self.check_done_event = multiprocessing.Event()
+        self.check_event = threading.Event()
+        self.check_done_event = threading.Event()
         self.check_thread = threading.Thread(target=self.check_all_targets_loop, args=(self.check_event,self.check_done_event))
         self.check_thread.start()
         
@@ -321,28 +321,30 @@ class TargetDetector(Timed):
             # for label, future in results.items():
             #     if future.result() is not None:
             #         all_impacts += future.result()
-            to_update = {label: self.potential_targets[label].needs_update() for label in target_labels}
+            self.to_update = {label: self.potential_targets[label].needs_update() for label in target_labels}
             
             for target_label in target_labels:
-                if to_update[target_label]:
+                if self.to_update[target_label]:
                     self.potential_targets[target_label].update(self.ray_origins, self.ray_directions, self.timestamp)
-            all_impacts = []
-            for target_label in target_labels:
-                if to_update[target_label]:
-                    impacts = self.potential_targets[target_label].get_impacts()
-                    if impacts is not None:
-                        all_impacts += impacts
-            # print(f'check all targets {(time.time()-t)*1000:.2f} ms')
-            self.check_all_targets_time_window.queue(((time.time()-t)*1000, self.get_elapsed()))
-            if len(all_impacts)>0:
-                self.all_impacts = np.vstack(all_impacts)
-            else:
-                self.all_impacts =  None
             check_done_event.set()
             check_event.clear()
             
     def get_impacts(self):
+        t = time.time()
         self.check_done_event.wait()
+        target_labels = self.potential_targets.copy().keys()
+        all_impacts = []
+        for target_label in target_labels:
+            if self.to_update[target_label]:
+                impacts = self.potential_targets[target_label].get_impacts()
+                if impacts is not None:
+                    all_impacts += impacts
+        # print(f'check all targets {(time.time()-t)*1000:.2f} ms')
+        self.check_all_targets_time_window.queue(((time.time()-t)*1000, self.get_elapsed()))
+        if len(all_impacts)>0:
+            self.all_impacts = np.vstack(all_impacts)
+        else:
+            self.all_impacts =  None
         self.check_done_event.clear()
         return self.all_impacts
         
@@ -746,7 +748,7 @@ class Target(Timed):
         self.input_queue = multiprocessing.Queue(maxsize=1)
         self.output_queue = multiprocessing.Queue(maxsize=1)
         self.check_impact_process = multiprocessing.Process(target=impact_checker_loop,
-                                                            args=(self.object.mesh,
+                                                            args=(self.object.mesh.copy(),
                                                                   self.stop_event,
                                                                   self.input_queue, 
                                                                   self.output_queue))

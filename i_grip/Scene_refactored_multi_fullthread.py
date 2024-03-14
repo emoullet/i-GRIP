@@ -14,7 +14,8 @@ from i_grip.utils2 import *
 from i_grip.Hands_refactored import GraspingHand
 from i_grip.Objects import RigidObject
 # from i_grip.Targets_refactored_multi_and_fullthread import TargetDetector
-from i_grip.Targets_refactored_fullmulti import TargetDetector
+# from i_grip.Targets_refactored_fullmulti import TargetDetector
+from i_grip.Targets_refactored_fullmulti_multichecker import TargetDetector
 # from i_grip.Targets_refactored_multi import TargetDetector
 from i_grip.clean_scene import CleanScene
 
@@ -317,7 +318,10 @@ class Scene :
             scene.add_geometry(new['mesh'], geom_name = new['name'])
         
         for label, hand in hands:      
+            t = time.time()
             hand.update_mesh()       
+            print(f'update_mesh time for hand {label} : {(time.time()-t)*1000:.2f} ms')
+            t = time.time()
             scene.graph.update(label,matrix = hand.get_mesh_transform(), geometry = label)
             if hand.full_hand:
                 tfs, paths = hand.get_keypoints_representation()
@@ -325,6 +329,7 @@ class Scene :
                     scene.graph.update(label+'_keypoint_'+str(i), matrix = tfs[i], geometry = label+'_keypoint_'+str(i))
                 scene.delete_geometry(label+'_keypoint_connection_paths')
                 scene.add_geometry(paths, geom_name=label+'_keypoint_connection_paths')
+            print(f'update_graph time for hand {label} : {(time.time()-t)*1000:.2f} ms')
 
     def update_object_meshes(self, scene):     
         objects_to_delete = self.objects_to_delete.copy().keys()
@@ -338,6 +343,7 @@ class Scene :
             
         for i in range(len(new_object_meshes)):
             new = new_object_meshes.pop(0)
+            scene.delete_geometry(new['name'])
             scene.add_geometry(new['mesh'], geom_name = new['name'])
             # self.objects_collider.add_object(new['name'], new['mesh'])      
 
@@ -392,8 +398,9 @@ class Scene :
             timestamp = time.time()
         tall = time.time()
         target_detector_labels = self.target_detectors.copy().keys()
-        t = time.time()
+        tt = {}
         for label in target_detector_labels:
+            tt[label] = time.time()
             self.target_detectors[label].check_all_targets()
         for label in target_detector_labels:
             scene.delete_geometry(label+'ray_impacts')
@@ -401,18 +408,19 @@ class Scene :
             if impacts is not None:
                 impacts_geom = tm.points.PointCloud(impacts, colors=self.hands[label].color)
                 scene.add_geometry(impacts_geom, geom_name=label+'ray_impacts')
-            print(f'check_all_targets time for hand {label} : {(time.time()-t)*1000:.2f} ms')
+            print(f'check_all_targets time for hand {label} : {(time.time()-tt[label])*1000:.2f} ms')
         print(f'check_all_targets time : {(time.time()-tall)*1000:.2f} ms')
 
     def fetch_all_targets(self, timestamp = None):
-        t = time.time()
         targets = {}
         target_detector_labels = self.target_detectors.copy().keys()
         if timestamp is None:
             timestamp = time.time()
         for label in target_detector_labels:
+            t = time.time()            
             targets[label], _ = self.target_detectors[label].get_most_probable_target(timestamp = timestamp)
-    
+            print(f'get_most_probable_target time for hand {label} : {(time.time()-t)*1000:.2f} ms')
+        t = time.time()
         objs = self.objects.keys()
         for olabel in objs:
             target_info = (False, None, None)
@@ -421,6 +429,7 @@ class Scene :
                     if olabel == targets[dlabel].label:
                         target_info=(True, self.hands[dlabel], targets[dlabel][olabel])
                     self.objects[olabel].set_target_info(target_info)
+        print(f'set_target_info time : {(time.time()-t)*1000:.2f} ms')
         # print(f'fetch_all_targets time : {(time.time()-t)*1000:.2f} ms')
 
     def evaluate_grasping_intention(self):
@@ -503,12 +512,24 @@ class Scene :
             data[hand.label + '_hand'] = hand.get_trajectory()
             # print(f"get_{hand.label}_data: {data[hand.label + '_hand']}")
         return data
+
+    def get_hands_rendering_data(self):
+        data = {}
+        for hand in self.hands.values():
+            data[hand.label + '_hand'] = hand.get_rendering_data()
+        return data
     
     def get_objects_data(self):
         data = {}
         for obj in self.objects.values():
             data[obj.label] = obj.get_trajectory()
             # print(f"get_{obj.label}_data: {data[obj.label ]}")
+        return data
+    
+    def get_objects_rendering_data(self):
+        data = {}
+        for obj in self.objects.values():
+            data[obj.label] = obj.get_rendering_data()
         return data
     
     def get_target_data(self):
@@ -614,4 +635,3 @@ class AnalysisScene(Scene):
                 hand.minimal_update(None)
         self.propagate_hands( timestamp = timestamp)
         
- 

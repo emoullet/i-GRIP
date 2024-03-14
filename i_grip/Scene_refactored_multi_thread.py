@@ -503,12 +503,25 @@ class Scene :
             # print(f"get_{hand.label}_data: {data[hand.label + '_hand']}")
         return data
     
+    def get_hands_rendering_data(self):
+        data = {}
+        for hand in self.hands.values():
+            data[hand.label + '_hand'] = hand.get_rendering_data()
+        return data
+    
+    
     def get_objects_data(self):
         data = {}
         for obj in self.objects.values():
             data[obj.label] = obj.get_trajectory()
             # print(f"get_{obj.label}_data: {data[obj.label ]}")
         return data
+    def get_objects_rendering_data(self):
+        data = {}
+        for obj in self.objects.values():
+            data[obj.label] = obj.get_rendering_data()
+        return data
+    
     
     def get_target_data(self):
         data = {}

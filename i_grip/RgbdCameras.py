@@ -216,6 +216,7 @@ class RgbdCamera:
             frame = cv2.resize(frame, self.cam_data['resolution'])
             if self.color_mode == self._RGB_MODE:
                 frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            # frame = cv2.blur(frame, (3,3))
             self.frame = frame
             self.new_frame = True
         else:

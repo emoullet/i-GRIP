@@ -218,7 +218,7 @@ class GraspingHand(Entity):
         self.margin = 10  # pixels
         self.font_size = 1
         self.font_thickness = 1
-        self.handedness_text_color = (88, 205, 54) # vibrant green
+        self.label_text_color = (88, 205, 54) # vibrant green
         self.font_size_xyz = 0.5
     
         ### define mesh
@@ -226,7 +226,7 @@ class GraspingHand(Entity):
         self.hand_pos_obj_frame = {}
         self.impact_locations_list = {}
         self.rays_vizualize_list = {}
-        self.full_hand = True
+        self.full_hand = False
         self.define_mesh_representation()
         self.update_mesh()
         self.most_probable_target = None
@@ -314,10 +314,12 @@ class GraspingHand(Entity):
             return
         self.mesh_position = Position(self.state.position_filtered*np.array([-1,1,1]))
         # self.mesh_position = Position(self.state.velocity_filtered*np.array([-1,1,1])+np.array([0,0,500]))
-        self.mesh_transform= tm.transformations.compose_matrix(translate = self.mesh_position.v)
+        self.mesh_transform= tm.transformations.translation_matrix(self.mesh_position.v)
         if self.full_hand:
-            print(f"self.state.world_landmarks : {self.state.world_landmarks}")
-            self.key_points_mesh_transforms = [tm.transformations.compose_matrix(translate = self.state.world_landmarks[i]*np.array([-1,1,1])) for i in range(21)]
+            # TODO : try a more efficient np formulation
+            t = time.time()
+            self.key_points_mesh_transforms = [tm.transformations.translation_matrix(self.state.world_landmarks[i]*np.array([-1,1,1])) for i in range(21)]
+            print(f'key_points_mesh_transforms time : {(time.time()-t)*1000:2f} ms')
             # print(f'connections : {self.key_points_key_points_connections}')
             # start_indexes = [connection[0] for connection in self.key_points_key_points_connections]
             # end_indexes = [connection[1] for connection in self.key_points_key_points_connections]
@@ -365,42 +367,86 @@ class GraspingHand(Entity):
         return targets
     
     def render(self, img):
-        # Draw the hand landmarks.
-        # displayed_landmarks = self.state.landmarks
-        t = time.time()
-        displayed_landmarks = self.detected_hand.get_landmarks()
-        landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+        # # Draw the hand landmarks.
+        # # displayed_landmarks = self.state.landmarks
+        # t = time.time()
+        # displayed_landmarks = self.detected_hand.get_landmarks()
+        # landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+        # # landmarks_proto.landmark.extend([
+        # #                                     landmark_pb2.NormalizedLandmark(x=landmark[0], y=landmark[1], z=landmark[2]) for landmark in displayed_landmarks])
         # landmarks_proto.landmark.extend([
         #                                     landmark_pb2.NormalizedLandmark(x=landmark[0], y=landmark[1], z=landmark[2]) for landmark in displayed_landmarks])
-        landmarks_proto.landmark.extend([
-                                            landmark_pb2.NormalizedLandmark(x=landmark[0], y=landmark[1], z=landmark[2]) for landmark in displayed_landmarks])
-        solutions.drawing_utils.draw_landmarks(
-                                            img,
-                                            landmarks_proto,
-                                            solutions.hands.HAND_CONNECTIONS,
-                                            solutions.drawing_styles.get_default_hand_landmarks_style(),
-                                            solutions.drawing_styles.get_default_hand_connections_style())
-        print(f'draw_landmarks tie : {(time.time()-t)*1000:2f} ms')
-        if self.show_label:
+        # solutions.drawing_utils.draw_landmarks(
+        #                                     img,
+        #                                     landmarks_proto,
+        #                                     solutions.hands.HAND_CONNECTIONS,
+        #                                     solutions.drawing_styles.get_default_hand_landmarks_style(),
+        #                                     solutions.drawing_styles.get_default_hand_connections_style())
+        # print(f'draw_landmarks tie : {(time.time()-t)*1000:2f} ms')
+        # if self.show_label:
+        #     # Get the top left corner of the detected hand's bounding box.
+        #     text_x = int(min(displayed_landmarks[:,0]))
+        #     text_y = int(min(displayed_landmarks[:,1])) - self.margin
+
+        #     # Draw handedness (left or right hand) on the image.
+        #     # cv2.putText(img, f"{self.handedness[0].category_name}",
+        #     #             (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
+        #     #             self.font_size, self.handedness_text_color, self.font_thickness, cv2.LINE_AA)
+            
+        #     cv2.putText(img, f"{self.label}",
+        #                 (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
+        #                 self.font_size, self.label_text_color, self.font_thickness, cv2.LINE_AA)
+        # if self.show_roi:
+        #     cv2.rectangle(img, (self.detected_hand.roi[0],self.detected_hand.roi[1]),(self.detected_hand.roi[2],self.detected_hand.roi[3]),self.label_text_color)
+
+        # if self.show_xyz:
+        #     # Get the top left corner of the detected hand's bounding box.z
+            
+        #     #print(f"{self.label} --- X: {self.xyz[0]/10:3.0f}cm, Y: {self.xyz[0]/10:3.0f} cm, Z: {self.xyz[0]/10:3.0f} cm")
+        #     if len(img.shape)<3:
+        #         height, width = img.shape
+        #     else:
+        #         height, width, _ = img.shape
+        #     x_coordinates = displayed_landmarks[:,0]
+        #     y_coordinates = displayed_landmarks[:,1]
+        #     x0 = int(max(x_coordinates) * width)
+        #     y0 = int(max(y_coordinates) * height) + self.margin
+
+        #     # Draw handedness (left or right hand) on the image.
+        #     cv2.putText(img, f"X:{self.state.position_filtered.x/10:3.0f} cm", (x0+10, y0+20), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (20,180,0), self.font_thickness, cv2.LINE_AA)
+        #     cv2.putText(img, f"Y:{self.state.position_filtered.y/10:3.0f} cm", (x0+10, y0+45), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (255,0,0), self.font_thickness, cv2.LINE_AA)
+        #     cv2.putText(img, f"Z:{self.state.position_filtered.z/10:3.0f} cm", (x0+10, y0+70), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (0,0,255), self.font_thickness, cv2.LINE_AA)
+
+        GraspingHand.render_hand(img, self.label, self.detected_hand.get_landmarks(), self.detected_hand.roi, self.state.position_filtered, self.show_label, self.show_xyz, self.show_roi, self.margin, self.font_size, self.font_thickness, self.font_size_xyz, self.label_text_color)
+    
+    def render_hand(img, label = None, displayed_landmarks = None, roi=None, position=None, show_label = True, show_xyz = True, show_roi = True, margin = 10, font_size = 1, font_thickness = 1, font_size_xyz = 0.5, label_text_color = (88, 205, 54)):
+        if displayed_landmarks is not None:
+            # Draw the hand landmarks.
+            landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+            landmarks_proto.landmark.extend([
+                                                landmark_pb2.NormalizedLandmark(x=landmark[0], y=landmark[1], z=landmark[2]) for landmark in displayed_landmarks])
+            solutions.drawing_utils.draw_landmarks(
+                                                img,
+                                                landmarks_proto,
+                                                solutions.hands.HAND_CONNECTIONS,
+                                                solutions.drawing_styles.get_default_hand_landmarks_style(),
+                                                solutions.drawing_styles.get_default_hand_connections_style())
+        if show_label:
             # Get the top left corner of the detected hand's bounding box.
             text_x = int(min(displayed_landmarks[:,0]))
-            text_y = int(min(displayed_landmarks[:,1])) - self.margin
+            text_y = int(min(displayed_landmarks[:,1])) - margin
 
             # Draw handedness (left or right hand) on the image.
-            # cv2.putText(img, f"{self.handedness[0].category_name}",
-            #             (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
-            #             self.font_size, self.handedness_text_color, self.font_thickness, cv2.LINE_AA)
-            
-            cv2.putText(img, f"{self.label}",
+            cv2.putText(img, f"{label}",
                         (text_x, text_y), cv2.FONT_HERSHEY_DUPLEX,
-                        self.font_size, self.handedness_text_color, self.font_thickness, cv2.LINE_AA)
-        if self.show_roi:
-            cv2.rectangle(img, (self.detected_hand.roi[0],self.detected_hand.roi[1]),(self.detected_hand.roi[2],self.detected_hand.roi[3]),self.handedness_text_color)
+                        font_size, label_text_color, font_thickness, cv2.LINE_AA)
+        if show_roi and roi is not None:
+            cv2.rectangle(img, (roi[0],roi[1]),(roi[2],roi[3]),label_text_color)
 
-        if self.show_xyz:
-            # Get the top left corner of the detected hand's bounding box.z
+        if show_xyz and position is not None:
+            # Get th e top left corner of the detected hand's bounding box.z
             
-            #print(f"{self.label} --- X: {self.xyz[0]/10:3.0f}cm, Y: {self.xyz[0]/10:3.0f} cm, Z: {self.xyz[0]/10:3.0f} cm")
+            #print(f"{label} --- X: {xyz[0]/10:3.0f}cm, Y: {xyz[0]/10:3.0f} cm, Z: {xyz[0]/10:3.0f} cm")
             if len(img.shape)<3:
                 height, width = img.shape
             else:
@@ -408,12 +454,28 @@ class GraspingHand(Entity):
             x_coordinates = displayed_landmarks[:,0]
             y_coordinates = displayed_landmarks[:,1]
             x0 = int(max(x_coordinates) * width)
-            y0 = int(max(y_coordinates) * height) + self.margin
+            y0 = int(max(y_coordinates) * height) + margin
 
             # Draw handedness (left or right hand) on the image.
-            cv2.putText(img, f"X:{self.state.position_filtered.x/10:3.0f} cm", (x0+10, y0+20), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (20,180,0), self.font_thickness, cv2.LINE_AA)
-            cv2.putText(img, f"Y:{self.state.position_filtered.y/10:3.0f} cm", (x0+10, y0+45), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (255,0,0), self.font_thickness, cv2.LINE_AA)
-            cv2.putText(img, f"Z:{self.state.position_filtered.z/10:3.0f} cm", (x0+10, y0+70), cv2.FONT_HERSHEY_DUPLEX, self.font_size_xyz, (0,0,255), self.font_thickness, cv2.LINE_AA)
+            cv2.putText(img, f"X:{position.x/10:3.0f} cm", (x0+10, y0+20), cv2.FONT_HERSHEY_DUPLEX, font_size_xyz, (20,180,0), font_thickness, cv2.LINE_AA)
+            cv2.putText(img, f"Y:{position.y/10:3.0f} cm", (x0+10, y0+45), cv2.FONT_HERSHEY_DUPLEX, font_size_xyz, (255,0,0), font_thickness, cv2.LINE_AA)
+            cv2.putText(img, f"Z:{position.z/10:3.0f} cm", (x0+10, y0+70), cv2.FONT_HERSHEY_DUPLEX, font_size_xyz, (0,0,255), font_thickness, cv2.LINE_AA)
+    
+    def get_rendering_data(self):
+        data={}
+        data['displayed_landmarks'] = self.detected_hand.get_landmarks()
+        data['roi'] = self.detected_hand.roi
+        data['position'] = self.state.position_filtered
+        data['font_size'] = self.font_size
+        data['font_thickness'] = self.font_thickness
+        data['font_size_xyz'] = self.font_size_xyz
+        data['label_text_color'] = self.label_text_color
+        data['label'] = self.label
+        data['show_label'] = self.show_label
+        data['show_xyz'] = self.show_xyz
+        data['show_roi'] = self.show_roi
+        data['margin'] = self.margin
+        return data
 
     def get_target_data(self):
         return self.targets_data

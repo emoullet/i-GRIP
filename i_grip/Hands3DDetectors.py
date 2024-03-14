@@ -4,6 +4,9 @@ import numpy as np
 import math
 import time
 from i_grip.config import _MEDIAPIPE_MODEL_PATH
+# import tensorflow as tf
+# print('TENSORFLOW GPU AVAILABLE:')
+# print(tf.config.list_physical_devices('GPU'))
 
 class Hands3DDetector:
     
@@ -11,7 +14,7 @@ class Hands3DDetector:
     VIDEO_FILE_MODE = 'VIDEO'
     _HANDS_MODE = ['left', 'right']
     
-    def __init__(self, cam_data, hands = _HANDS_MODE,running_mode = LIVE_STREAM_MODE,  mediapipe_model_path=_MEDIAPIPE_MODEL_PATH):
+    def __init__(self, cam_data, hands = _HANDS_MODE,running_mode = LIVE_STREAM_MODE,  mediapipe_model_path=_MEDIAPIPE_MODEL_PATH, use_gpu=True):
         self.cam_data = cam_data
         
         for hand in hands:
@@ -25,23 +28,27 @@ class Hands3DDetector:
         if running_mode not in [self.LIVE_STREAM_MODE, self.VIDEO_FILE_MODE]:
             raise ValueError(f'running_mode must be one of {self.LIVE_STREAM_MODE} or {self.VIDEO_FILE_MODE}')
         
+        if use_gpu:            
+            base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path,
+                                              delegate = mp.tasks.BaseOptions.Delegate.GPU)
+        else:
+            base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path)
+            
         if running_mode == self.LIVE_STREAM_MODE:
             self.get_hands = self.get_hands_live_stream
             self.landmarker_options = mp.tasks.vision.HandLandmarkerOptions(
-                base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path,
-                delegate = mp.tasks.BaseOptions.Delegate.GPU),
-                running_mode=mp.tasks.vision.RunningMode.LIVE_STREAM,
+                base_options=base_options,
+                running_mode=mp.tasks.vision.RunningMode.VIDEO,
                 num_hands=self.num_hands,
-                min_hand_presence_confidence=0.4,
-                min_hand_detection_confidence=0.4,
-                min_tracking_confidence=0.4,
+                min_hand_presence_confidence=0.5,
+                min_hand_detection_confidence=0.5,
+                min_tracking_confidence=0.5,
                 result_callback=self.extract_hands,
             )
         elif running_mode == self.VIDEO_FILE_MODE:
             self.get_hands = self.get_hands_video
             self.landmarker_options = mp.tasks.vision.HandLandmarkerOptions(
-                base_options=mp.tasks.BaseOptions(model_asset_path=mediapipe_model_path,
-                delegate = mp.tasks.BaseOptions.Delegate.GPU),
+                base_options=base_options,
                 running_mode=mp.tasks.vision.RunningMode.VIDEO,
                 num_hands=self.num_hands,
                 min_hand_presence_confidence=0.4,

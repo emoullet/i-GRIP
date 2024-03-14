@@ -33,17 +33,19 @@ def report_gpu():
 
 def detect_hands_task( cam_data,hands, stop_event, img_depth_queue, detected_hands_queue):
     hand_detector = hd.Hands3DDetector(cam_data, hands = hands, running_mode =
-                                            hd.Hands3DDetector.LIVE_STREAM_MODE)
+                                            hd.Hands3DDetector.VIDEO_FILE_MODE, use_gpu=True)
     print('detect_hands_task: started')
     while True:
-        t = time.time()
         if stop_event.is_set():
             break
         print('detect_hands_task: waiting for img')
         my_img, my_depth_map = img_depth_queue.get()
         # print('detect_hands_task: got img')
         # print(my_img)
-        detected_hands = hand_detector.get_hands(my_img, my_depth_map)
+        t = time.time()
+        detected_hands = hand_detector.get_hands(my_img, my_depth_map,time.time())
+        print('detect_hands_task: updated hands')
+        print(f'detect_hands_task: {(time.time()-t)*1000:.2f} ms')
         if detected_hands is not None:
             # print('detect_hands_task: got hands')
             # print(detected_hands)
@@ -51,8 +53,6 @@ def detect_hands_task( cam_data,hands, stop_event, img_depth_queue, detected_han
             # print('detect_hands_task: sent hands')
         if not img_depth_queue.empty():
             img_depth_queue.get()
-        print('detect_hands_task: updated hands')
-        print(f'detect_hands_task: {(time.time()-t)*1000:.2f} ms')
     hand_detector.stop()
 
 def detect_objects_task(dataset, cam_data, stop_event, detect_event, img_queue, detected_objects_queue):
@@ -116,6 +116,7 @@ def scene_analysis_task(cam_data, stop_event, detect_event, img_queue, hands_que
     scene = sc.LiveScene(cam_data, name='Full tracking', plotter=plotter, )
     while True:
         # HANDS
+        t_s = time.time()
         t = time.time()
         if not hands_queue.empty():
             estimated_hands = hands_queue.get()
@@ -161,6 +162,7 @@ def scene_analysis_task(cam_data, stop_event, detect_event, img_queue, hands_que
         if k == 27:
             print('end')
             break
+        print(f'scene analysis task: {(time.time()-t_s)*1000:.2f} ms')
     stop_event.set()
         
 class GraspingDetector:
