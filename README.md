@@ -73,19 +73,53 @@ pip install -e .
 
 # Downloading and preparing data
 
-Required data paths are declared in `config.py` and may be adapted to your own architecture
+Required data paths are declared in `config.py` and may be have to be adapted to your own architecture
 
-## Cosypose
+## Automatic download
+
+Create a (real or symbolic) folder `local_data` in your cosypose folder. You can then run `download.py` to automatically download required data.
+This script requires the `rcclone` lib, that can be installed by running :
+
+```
+curl https://rclone.org/install.sh | sudo bash
+```
+
+## Manual download
+
+### Cosypose
 
 Follow <a href="https://github.com/Simple-Robotics/cosypose?tab=readme-ov-file#downloading-and-preparing-data">these instructions </a> to download neural networks and 3d models.
-Depending on the performances of your setup, the ray tracing used in the algorithm may be slow with the original, high definition ycbv and t-less 3d meshes. If that is the case, you may run the script `simplify_meshes.py`, and adjust the constants `_*dataset*_TARGET_COUNT` to your preferences.
+You may run :
 
-## Mediapipe
+```
+python -m cosypose.scripts.download --bop_dataset=ycbv
+python -m cosypose.scripts.download --bop_dataset=tless
+```
+
+```
+python -m cosypose.scripts.download --urdf_models=ycbv
+python -m cosypose.scripts.download --urdf_models=tless.cad
+```
+
+```
+python -m cosypose.scripts.download --model='detector-bop-ycbv-synt+real--292971'
+python -m cosypose.scripts.download --model='coarse-bop-tless-synt+real--160982'
+python -m cosypose.scripts.download --model='refiner-bop-tless-synt+real--881314'
+python -m cosypose.scripts.download --model='detector-bop-tless-synt+real--452847'
+python -m cosypose.scripts.download --model= 'coarse-bop-ycbv-synt+real--822463'
+python -m cosypose.scripts.download --model='refiner-bop-ycbv-synt+real--631598'
+```
+
+### Mediapipe
 
 see : https://developers.google.com/mediapipe/solutions/vision/hand_landmarker
 
 or dl directly :
 https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task
+
+## Mesh simplification
+
+Depending on the performances of your setup, the ray tracing used in the algorithm may be slow with the original, high definition ycbv and t-less 3d meshes. If that is the case, you may run the script `simplify_meshes.py`, and adjust `faces_factor` to your preferences.
 
 # Hardware
 
