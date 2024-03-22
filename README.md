@@ -78,10 +78,11 @@ Required data paths are declared in `config.py` and may be have to be adapted to
 ## Automatic download
 
 Create a (real or symbolic) folder `local_data` in your cosypose folder. You can then run `download.py` to automatically download required data.
-This script requires the `rcclone` lib, that can be installed by running :
+This script requires the `rcclone` and wget libs, that can be installed by running :
 
 ```
 curl https://rclone.org/install.sh | sudo bash
+pip install wget
 ```
 
 ## Manual download
