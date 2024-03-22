@@ -53,12 +53,14 @@ i_grip/databases_utils.py
 i_grip/grip_test.py
 i_grip/grip_test2.py
 i_grip/grip_test3.py
+i_grip/grip_test3b.py
 i_grip/image_utils.py
 i_grip/model_utils.py
 i_grip/simplify_meshes.py
 i_grip/test_anim.py
 i_grip/test_check_times.py
 i_grip/tm_qckstrt.py
+i_grip/trim.py
 i_grip/ts.py
 i_grip/utils.py
 i_grip/utils2.py

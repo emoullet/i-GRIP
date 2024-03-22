@@ -28,14 +28,15 @@ class ExperimentReplayer:
         cam_data_2 = {}
         for key in cam_data:
             cam_data_2[key] = cam_data[key]
-        cam_data_2['resolution'] = (self.resolution[1], self.resolution[0])
+        # cam_data_2['resolution'] = (self.resolution[1], self.resolution[0])
         hands = ['right', 'left']
-        self.hand_detector = hd.Hands3DDetector(cam_data, hands = hands, running_mode =
-                                            hd.Hands3DDetector.VIDEO_FILE_MODE)
+        self.hand_detector = hd.Hands3DDetector(cam_data_2, hands = hands, running_mode =
+                                            hd.Hands3DDetector.VIDEO_FILE_MODE,
+                                            use_gpu=True)
         self.object_detector = o2d.get_object_detector(dataset,
-                                                       cam_data)
+                                                       cam_data_2)
         self.object_pose_estimator = ope.get_pose_estimator(dataset,
-                                                            cam_data,
+                                                            cam_data_2,
                                                             use_tracking = True,
                                                             fuse_detections=False)
         print('Waiting for the camera to start...')
@@ -45,7 +46,7 @@ class ExperimentReplayer:
             self.name = f'ExperimentReplayer_{dataset}'
         else:
             self.name = name
-        self.scene = sc.ReplayScene( cam_data, name = f'{self.name}_scene', dataset = dataset)
+        self.scene = sc.ReplayScene( cam_data_2, name = f'{self.name}_scene', dataset = dataset)
         # self.scene = sc.ReplayScene( device_data, name = f'{self.name}_scene')
         self.rgbd_cam.start()
     
@@ -64,9 +65,15 @@ class ExperimentReplayer:
         else:
             cv_window_name = f'{self.name} : Replaying'
         self.detect = True
+        failed_detections_count = 0
+        split_image = False
         print(f'all timestamps: {self.rgbd_cam.get_timestamps()}')
         for timestamp in self.rgbd_cam.get_timestamps():
             success, img, depth_map = self.rgbd_cam.next_frame()
+            width, height = img.shape[1], img.shape[0]
+            if height >= width:
+                img = cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+                # depth_map = cv2.rotate(depth_map, cv2.ROTATE_90_COUNTERCLOCKWISE)
             if not success:
                 continue
             # img = cv2.resize(img, (self.resolution[1], self.resolution[0]))
@@ -83,6 +90,15 @@ class ExperimentReplayer:
             
             # smol_to_process_img = cv2.resize(to_process_img, (int(self.resolution[0]/fac), int(self.resolution[1]/fac)))
             
+            
+            # show depth map
+            
+            depthFrameColor = cv2.normalize(depth_map, None, 255, 0, cv2.NORM_INF, cv2.CV_8UC1)
+            depthFrameColor = cv2.equalizeHist(depthFrameColor)
+            depthFrameColor = cv2.applyColorMap(depthFrameColor, cv2.COLORMAP_JET)
+            depthFrameColor = cv2.resize(depthFrameColor, (depthFrameColor.shape[1]//2, depthFrameColor.shape[0]//2))
+            cv2.imshow(f'depth ', depthFrameColor)
+            
             # Hand detection
             hands = self.hand_detector.get_hands(to_process_img, depth_map, timestamp)
             # smol_hands = self.hand_detector.get_hands(smol_to_process_img)
@@ -92,9 +108,51 @@ class ExperimentReplayer:
 
             # Object detection
             if self.detect:
-                self.object_detections = self.object_detector.detect(to_process_img)
+                if not split_image:
+                    self.object_detections = self.object_detector.detect(to_process_img)
+                else:
+                    half = int(to_process_img.shape[1]/2)
+                    print(f'to_process_img shape: {to_process_img.shape}')
+                    img1 = to_process_img[:, :int(to_process_img.shape[1]/2)]
+                    img2 = to_process_img[:, int(to_process_img.shape[1]/2):]    
+                    print(f'img1 shape: {img1.shape}')
+                    print(f'img2 shape: {img2.shape}')
+                    object_detections1 = self.object_detector.detect(img1)
+                    object_detections2 = self.object_detector.detect(img2)
+                    print(f'object_detections1: {object_detections1}')
+                    print(f'object_detections2: {object_detections2}')
+                    bbox1 = object_detections1.bboxes.cpu()
+                    bbox2 = object_detections2.bboxes.cpu()
+                    print(f'bbox1: {bbox1}')
+                    print(f'bbox2: {bbox2}')
+                    # add half to x coordinate of bbox2
+                    bbox2[:, 0] += half
+                    bbox2[:, 2] += half
+                    print(f'bbox2: {bbox2}')
+                    united_detection = object_detections1
+                    infos_u = united_detection.infos
+                    bbox_u = united_detection.bboxes.cpu()
+                    infos_2 = object_detections2.infos
+                    i=0
+                    for row in infos_u.iterrows():
+                        if row[1]['label'] not in infos_2['label'].values:
+                            infos_u.loc[len(infos_u)] = row[1]
+                        else:
+                            bbox_u[i, 0] = min(bbox_u[i, 0], bbox2[i, 0])
+                            bbox_u[i, 2] = min(bbox_u[i, 2], bbox2[i, 2])
+                            bbox_u[i, 1] = max(bbox_u[i, 1], bbox2[i, 1])
+                            bbox_u[i, 3] = max(bbox_u[i, 3], bbox2[i, 3])
+                    united_detection.bboxes = bbox_u.cuda().float()
+                    self.object_detections = united_detection
+                    
+                            
+                    
+                
                 if self.object_detections is not None:
                     self.detect = False
+                    failed_detections_count += 1
+                if failed_detections_count > 3:
+                    split_image = True
                 print('detect')
             else:
                 self.object_detections = None

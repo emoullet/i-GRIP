@@ -2,6 +2,7 @@ import depthai as dai
 import cv2
 import numpy as np
 import time
+import pandas as pd
 
 class RgbdCamera:
     
@@ -271,3 +272,51 @@ class RgbdCamera:
     
     def is_on_replay(self):
         return self.current_frame_index<self.nb_frames
+
+
+class RgbdReader:
+    def __init__(self, file_path) -> None:
+        self.load_cam_data(file_path)
+    
+    def load_cam_data(self, file_path):
+        self.cam_data = np.load(file_path)
+    
+    def load(self, path, file_name, suffix = ''):
+        if suffix != '':
+            suffix = f'_{suffix}'
+        video_path = f'{path}/{file_name}_video{suffix}.avi'
+        timestamps_and_depth_maps_path = f'{path}/{file_name}_depth_map{suffix}.gzip'
+        timestamps_and_depth_maps = pd.read_pickle(timestamps_and_depth_maps_path, compression='gzip')
+        replay = timestamps_and_depth_maps.to_dict(orient='list')
+        replay['Video'] = video_path
+        self.load_replay(replay)
+        
+    
+    def load_replay(self, replay):
+        self.video = cv2.VideoCapture(replay['Video'])
+        self.nb_frames = int(self.video.get(cv2.CAP_PROP_FRAME_COUNT))
+        self.current_frame_index = 0
+        if not self.video.isOpened():
+            print("Error reading video") 
+            exit()
+        print(replay.keys())
+        self.timestamps = replay['Timestamps']
+        self.depth_maps = replay['Depth_maps']
+    
+    def next_frame(self):
+        success, frame = self.video.read()
+        # frame = cv2.resize(frame, self.cam_data['resolution'])
+        self.frame = frame
+        self.depth_map = self.depth_maps[self.current_frame_index]
+        # self.depth_map = cv2.resize(self.depth_map, self.cam_data['resolution'])
+        self.timestamp = self.timestamps[self.current_frame_index]
+        self.current_frame_index += 1
+        return success, self.frame, self.depth_map
+    
+
+    def get_timestamps(self):
+        return self.timestamps
+    
+    
+    def get_device_data(self):
+        return self.cam_data

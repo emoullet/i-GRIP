@@ -51,9 +51,9 @@ class Hands3DDetector:
                 base_options=base_options,
                 running_mode=mp.tasks.vision.RunningMode.VIDEO,
                 num_hands=self.num_hands,
-                min_hand_presence_confidence=0.4,
-                min_hand_detection_confidence=0.4,
-                min_tracking_confidence=0.4
+                min_hand_presence_confidence=0.5,
+                min_hand_detection_confidence=0.5,
+                min_tracking_confidence=0.5
             )
             
         self.init_landmarker()

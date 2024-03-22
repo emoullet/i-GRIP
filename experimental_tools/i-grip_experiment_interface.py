@@ -867,7 +867,7 @@ if __name__ == "__main__":
     kill_gpu_processes()
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'record', help="Mode of the interface")
+    parser.add_argument('-m', '--mode', choices=['record', 'pre_processing', 'replay', 'analysis'], default = 'replay', help="Mode of the interface")
     args = vars(parser.parse_args())
     if args['mode'] == 'record':
         interface = ExperimentRecordingInterface()

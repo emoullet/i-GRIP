@@ -5,7 +5,7 @@ import numpy as np
 from i_grip.model_utils import load_detector
 import cv2
 import torch.multiprocessing as mp
-from i_grip.config import _YCVB_MESH_PATH, _TLESS_MESH_PATH
+from i_grip.config import _YCVB_MESH_PATH, _TLESS_MESH_PATH, TLESS_DETECTOR_ID, YCVB_DETECTOR_ID
 
 mp = mp.get_context('spawn')
 class Object2DDetector:
@@ -15,11 +15,11 @@ class Object2DDetector:
         print('Building Object2DDetector')
         self.dataset = dataset
         if(dataset == "ycbv"):
-            object_detector_run_id = 'detector-bop-ycbv-synt+real--292971'
+            object_detector_run_id = TLESS_DETECTOR_ID
             # object_detector_run_id = 'detector-bop-ycbv-pbr--970850'
             self.mesh_path = _YCVB_MESH_PATH
         elif(dataset == "tless"):
-            object_detector_run_id = 'detector-bop-tless-synt+real--452847'
+            object_detector_run_id = YCVB_DETECTOR_ID
             self.mesh_path = _TLESS_MESH_PATH
         else:
             assert False
@@ -187,28 +187,28 @@ class Object2DDetector:
             # self.it+=1
             # detections_windows=None
             # detections_full = None
-            # if detections_windows is not None:
-            #     print(detections_windows)
-            #     det_win_infos = detections_windows.infos
-            #     filtered_det_win_infos= det_win_infos.sort_values('score',ascending = False).drop_duplicates('label').sort_index()
-            #     ids = filtered_det_win_infos.index
-            #     im_ids = [i - 1 for i in filtered_det_win_infos['batch_im_id']]
-            #     gaps = [[w[0][0], w[0][0], w[1][0], w[1][0]] for w in [self.windows[j] for j in im_ids]]
-            #     gaps = torch.as_tensor(gaps).cuda().float()
-            #     print(filtered_det_win_infos)
-            #     print(gaps)
-            #     det_win_tensors = detections_windows.tensors['bboxes']
-            #     print(det_win_tensors)
-            #     print(im_ids)
-            #     filtered_det_win_tensors = det_win_tensors[ids,:]
-            #     print(filtered_det_win_tensors)
-            #     filtered_det_win_tensors = torch.add(filtered_det_win_tensors, gaps)
-            #     print(filtered_det_win_tensors)
-            #     self.detections = PandasTensorCollection(
-            #     infos=pd.DataFrame(filtered_det_win_infos),
-            #     bboxes=filtered_det_win_tensors,
-            #     )
-            #     self.detections.infos['batch_im_id'] = [0 for i in range(len(self.detections.infos['label']))]
+            if detections_windows is not None:
+                print(detections_windows)
+                det_win_infos = detections_windows.infos
+                filtered_det_win_infos= det_win_infos.sort_values('score',ascending = False).drop_duplicates('label').sort_index()
+                ids = filtered_det_win_infos.index
+                im_ids = [i - 1 for i in filtered_det_win_infos['batch_im_id']]
+                gaps = [[w[0][0], w[0][0], w[1][0], w[1][0]] for w in [self.windows[j] for j in im_ids]]
+                gaps = torch.as_tensor(gaps).cuda().float()
+                print(filtered_det_win_infos)
+                print(gaps)
+                det_win_tensors = detections_windows.tensors['bboxes']
+                print(det_win_tensors)
+                print(im_ids)
+                filtered_det_win_tensors = det_win_tensors[ids,:]
+                print(filtered_det_win_tensors)
+                filtered_det_win_tensors = torch.add(filtered_det_win_tensors, gaps)
+                print(filtered_det_win_tensors)
+                self.detections = PandasTensorCollection(
+                infos=pd.DataFrame(filtered_det_win_infos),
+                bboxes=filtered_det_win_tensors,
+                )
+                self.detections.infos['batch_im_id'] = [0 for i in range(len(self.detections.infos['label']))]
             #     if self.use_prior:
             #         self.detecting = False
             # else: 

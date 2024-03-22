@@ -22,7 +22,7 @@ from i_grip import Scene_refactored_multi_fullthread as sc
 from i_grip import Plotters3 as pl
 # from i_grip import Plotters_queue as pl
 from i_grip.utils import kill_gpu_processes
-
+from i_grip.config import _DEFAULT_YCBV_TEST_PICTURES
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 def report_gpu():
    print(torch.cuda.list_gpu_processes())
@@ -296,7 +296,7 @@ if __name__ == '__main__':
                         default = 'ycbv', help="Cosypose dataset to use for object detection and pose estimation")
     parser.add_argument('-f', '--fps', type=int, default=40, help="Frames per second for the camera")
     # parser.add_argument('-i', '--images', nargs='+', help="Path to the image(s) to use for object detection", default=['./YCBV_test_pictures/javel.png'])
-    parser.add_argument('-i', '--images', nargs='+', help="Path to the image(s) to use for object detection", default=['./YCBV_test_pictures/javel.png', './YCBV_test_pictures/mustard_front.png'])
+    parser.add_argument('-i', '--images', nargs='+', help="Path to the image(s) to use for object detection", default=_DEFAULT_YCBV_TEST_PICTURES)
     args = vars(parser.parse_args())
 
     os.environ['CUDA_VISIBLE_DEVICES'] = '0'

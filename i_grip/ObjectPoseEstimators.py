@@ -7,6 +7,7 @@ import pandas as pd
 from i_grip.image_utils import make_cameras
 from i_grip.model_utils import load_pose_predictor
 from cosypose.utils.tensor_collection import PandasTensorCollection
+from i_grip.config import TLESS_COARSE_ESTIMATOR_ID, TLESS_REFINER_ESTIMATOR_ID, YCVB_COARSE_ESTIMATOR_ID, YCVB_REFINER_ESTIMATOR_ID
 
 
 class KnownObjectPoseEstimator:
@@ -30,13 +31,13 @@ class KnownObjectPoseEstimator:
         #self.windows = [((0,0),(1152,648))]
 
         if(dataset == "ycbv"):
-            object_coarse_run_id = 'coarse-bop-ycbv-synt+real--822463'
-            object_refiner_run_id = 'refiner-bop-ycbv-synt+real--631598'
+            object_coarse_run_id = YCVB_COARSE_ESTIMATOR_ID
+            object_refiner_run_id = YCVB_REFINER_ESTIMATOR_ID
             # object_coarse_run_id = 'coarse-bop-ycbv-pbr--724183'
             # object_refiner_run_id = 'refiner-bop-ycbv-pbr--604090'
         elif(dataset == "tless"):
-            object_coarse_run_id = 'coarse-bop-tless-synt+real--160982'
-            object_refiner_run_id = 'refiner-bop-tless-synt+real--881314'
+            object_coarse_run_id = TLESS_COARSE_ESTIMATOR_ID
+            object_refiner_run_id = TLESS_REFINER_ESTIMATOR_ID
         else:
             assert False
         print('object_coarse_run_id',object_coarse_run_id)

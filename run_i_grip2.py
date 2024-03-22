@@ -34,7 +34,7 @@ def report_gpu():
 
 def detect_hands_task( cam_data,hands, stop_event, img_depth_queue, detected_hands_queue):
     hand_detector = hd.Hands3DDetector(cam_data, hands = hands, running_mode =
-                                            hd.Hands3DDetector.LIVE_STREAM_MODE)
+                                            hd.Hands3DDetector.VIDEO_FILE_MODE)
     print('detect_hands_task: started')
     while True:
         t = time.time()
@@ -44,7 +44,7 @@ def detect_hands_task( cam_data,hands, stop_event, img_depth_queue, detected_han
         my_img, my_depth_map = img_depth_queue.get()
         # print('detect_hands_task: got img')
         # print(my_img)
-        detected_hands = hand_detector.get_hands(my_img, my_depth_map)
+        detected_hands = hand_detector.get_hands(my_img, my_depth_map, time.time())
         if detected_hands is not None:
             # print('detect_hands_task: got hands')
             # print(detected_hands)

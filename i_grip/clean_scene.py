@@ -58,7 +58,6 @@ class CleanSceneGraph(SceneGraph):
         # but the only property using the geometry should be
         # nodes_geometry: if this becomes not true change this to clear!
         self._cache.clear()
-        print('cache cleared by remove_geometries')
         self.transforms._hash = None
         
 
@@ -141,7 +140,6 @@ class CleanScene(Scene):
         name : hashable
           Name that references self.geometry
         """
-        print('scene delete_geometry')
         # make sure we have a set we can check
         if util.is_string(names):
             names = [names]
